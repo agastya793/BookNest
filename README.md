@@ -17,30 +17,82 @@ BookNest is an application built for managing books, tracking reading milestones
 
 ## 🏗️ Architecture
 
-BookNest uses a decoupled client-server architecture:
+BookNest is built with a decoupled, high-integrity client-server architecture designed for reliability, real-time collaboration, and strict database-level data integrity:
 
-```
-┌─────────────────────────────────────────┐
-│           React 19 + Vite SPA           │
-│   (Port 5173 — Dev Reverse Proxy)       │
-└────────────────────┬────────────────────┘
-                     │  /api (HTTP) & /socket.io (WS)
-                     ▼
-┌─────────────────────────────────────────┐
-│          FastAPI Backend (ASGI)         │
-│   (Port 8000 — Routers, Auth, Sockets)  │
-└────────────────────┬────────────────────┘
-                     │  SQLAlchemy 2.0 (psycopg v3)
-                     ▼
-┌─────────────────────────────────────────┐
-│           PostgreSQL Database           │
-│   (Relational Schema + Partial Indexes) │
-└─────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph Client ["Frontend Layer — React 19 + Vite (Port 5173)"]
+        direction TB
+        UI["React SPA<br/>(Components, Pages, Protected Routes)"]
+        Context["State Management<br/>(AuthContext, SocketContext)"]
+        Axios["Axios HTTP Client<br/>(baseURL: /api + 401 Interceptors)"]
+        SocketClient["Socket.IO Client<br/>(Realtime Event Listeners)"]
+        ViteProxy["Vite Dev Server Proxy<br/>(/api ➔ :8000 | /socket.io ➔ :8000)"]
+        
+        UI --> Context
+        Context --> Axios
+        Context --> SocketClient
+        Axios --> ViteProxy
+        SocketClient --> ViteProxy
+    end
+
+    subgraph Backend ["Backend Layer — FastAPI (Port 8000)"]
+        direction TB
+        App["FastAPI Application & CORS Middleware"]
+        AuthGuard["Security & Auth Dependencies<br/>(get_current_user, JWT Bearer)"]
+        Routers["Modular Routers<br/>(/auth, /books, /shelves, /lending, /dashboard)"]
+        Services["Domain Services<br/>(auth_service, permission, realtime, activity)"]
+        SocketServer["Python-SocketIO Server<br/>(ASGI Realtime Event Broadcasting)"]
+        
+        App --> AuthGuard
+        App --> Routers
+        App --> SocketServer
+        Routers --> Services
+        SocketServer --> Services
+    end
+
+    subgraph Data ["Data & Persistence Layer — PostgreSQL"]
+        direction TB
+        ORM["SQLAlchemy 2.0 ORM & Engine<br/>(psycopg v3 Driver)"]
+        Alembic["Alembic Migrations<br/>(Transactional Schema Versioning)"]
+        
+        subgraph Tables ["PostgreSQL Database (booknest)"]
+            T_Users[("users<br/>Auth & Profiles")]
+            T_Books[("books<br/>Personal Library")]
+            T_Shelves[("shelves<br/>Custom Collections")]
+            T_ShelfBooks[("shelf_books<br/>M:N Join")]
+            T_ShelfShares[("shelf_shares<br/>RBAC: Editor / Viewer")]
+            T_Lendings[("lendings<br/>Partial Index: One Active Loan")]
+            T_Activity[("activity_logs<br/>Audit Trail")]
+            T_Tokens[("refresh_tokens<br/>Hashed Token Store")]
+        end
+        
+        ORM --> Tables
+        Alembic -.-> Tables
+    end
+
+    ViteProxy -- "HTTP / REST (JSON with JWT & Cookies)" --> App
+    ViteProxy -- "WebSocket Bi-directional Events" --> SocketServer
+    Services --> ORM
 ```
 
-* **Frontend:** Client-side Single Page Application (SPA) built with React and Vite. All API requests use relative paths (`/api/...`) and are forwarded to the backend via Vite's development proxy.
-* **Backend:** Asynchronous/synchronous REST and WebSocket API built with FastAPI and Uvicorn.
-* **Persistence:** PostgreSQL managed through SQLAlchemy 2.0 Declarative Base and version-controlled Alembic migrations.
+### Architectural Highlights
+
+1. **Frontend Isolation & Proxying:**
+   * The React SPA executes entirely client-side.
+   * In development, the Vite dev server acts as a reverse proxy, mapping `/api` and `/socket.io` to FastAPI on port `8000`.
+   * Requests stay same-origin from the browser's perspective, protecting against CORS quirks and enabling secure, first-party cookie handling for refresh tokens.
+
+2. **Modular FastAPI Backend:**
+   * Organized into explicit layers: **Routers** (HTTP transport), **Services** (business rules and calculations), and **Models** (database mapping).
+   * Dependency injection (`get_current_user`, `get_db`) cleanly decouples route handlers from session management and user authorization.
+
+3. **Database-Level Invariant Enforcement:**
+   * Rather than relying solely on application-layer checks, critical business rules are enforced at the PostgreSQL engine level:
+     * **No Double Lending:** Enforced by PostgreSQL partial unique index `ix_lending_active_book` (`book_id WHERE is_active = true`).
+     * **No Duplicate Shelves:** Enforced by `uq_shelf_user_name` on `(user_id, name)`.
+     * **Valid Ratings & Statuses:** Enforced by `CheckConstraint` on books and shelf roles.
+
 
 ---
 
