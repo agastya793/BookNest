@@ -11,6 +11,7 @@ from app.schemas.book import (
     BookUpdate,
     BookResponse,
     BookStatus,
+    PaginatedBooksResponse,
 )
 from app.schemas.shelf import (
     ShelfBase,
@@ -33,6 +34,7 @@ __all__ = [
     "BookUpdate",
     "BookResponse",
     "BookStatus",
+    "PaginatedBooksResponse",
     "ShelfBase",
     "ShelfCreate",
     "ShelfUpdate",

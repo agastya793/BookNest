@@ -104,3 +104,15 @@ class BookResponse(BaseModel):
         if self.total_pages is not None and self.total_pages > 0:
             return round((self.current_page / self.total_pages) * 100, 1)
         return None
+
+
+class PaginatedBooksResponse(BaseModel):
+    """Server-side paginated response wrapper for books catalog."""
+    items: list[BookResponse] = Field(default_factory=list, description="List of books for current page")
+    page: int = Field(..., ge=1, description="Current page number (1-indexed)")
+    page_size: int = Field(..., ge=1, description="Number of items per page")
+    total: int = Field(..., ge=0, description="Total count of books matching the applied filters")
+    total_pages: int = Field(..., ge=0, description="Total number of pages")
+
+    model_config = ConfigDict(from_attributes=True)
+

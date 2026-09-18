@@ -1,3 +1,4 @@
+import math
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
@@ -66,24 +67,22 @@ def get_book(db: Session, user_id: UUID, book_id: UUID) -> Book:
 def list_books(
     db: Session,
     user_id: UUID,
+    page: int = 1,
+    page_size: int = 10,
     status_filter: Optional[str] = None,
     shelf_id: Optional[UUID] = None,
     search: Optional[str] = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
-) -> list[Book]:
+) -> dict:
     """
     List books belonging to the authenticated user with status filtering,
     optional shelf filtering, case-insensitive search against title/author,
-    and standardized sorting.
+    standardized sorting, and server-side pagination executed in PostgreSQL.
     """
-    query = (
-        db.query(Book)
-        .options(selectinload(Book.shelf_books))
-        .filter(Book.user_id == user_id)
-    )
+    query = db.query(Book).filter(Book.user_id == user_id)
 
-    # Optional shelf filter
+    # Optional shelf filter: enforce shelf ownership and association
     if shelf_id:
         shelf = (
             db.query(Shelf)
@@ -108,9 +107,13 @@ def list_books(
         term = f"%{search.strip()}%"
         query = query.filter((Book.title.ilike(term)) | (Book.author.ilike(term)))
 
-    # Sort parameter mapping
+    # Compute total matching records in database before pagination
+    total = query.count()
+
+    # Sort parameter mapping (supporting date_added, rating, title, created_at, etc.)
     sort_column_map = {
         "created_at": Book.created_at,
+        "date_added": Book.created_at,
         "updated_at": Book.updated_at,
         "title": Book.title,
         "author": Book.author,
@@ -119,12 +122,30 @@ def list_books(
     }
     sort_column = sort_column_map.get(sort_by, Book.created_at)
 
+    # Deterministic secondary ordering ensures pagination remains stable across identical sort values
     if sort_dir.lower() == "asc":
-        query = query.order_by(sort_column.asc().nulls_last())
+        query = query.order_by(sort_column.asc().nulls_last(), Book.id.asc())
     else:
-        query = query.order_by(sort_column.desc().nulls_last())
+        query = query.order_by(sort_column.desc().nulls_last(), Book.id.asc())
 
-    return query.all()
+    # Database-level pagination via OFFSET and LIMIT
+    offset = (page - 1) * page_size
+    items = (
+        query.options(selectinload(Book.shelf_books))
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+
+    total_pages = math.ceil(total / page_size) if total > 0 else 0
+
+    return {
+        "items": items,
+        "page": page,
+        "page_size": page_size,
+        "total": total,
+        "total_pages": total_pages,
+    }
 
 
 def update_book(

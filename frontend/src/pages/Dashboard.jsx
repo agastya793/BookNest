@@ -32,6 +32,12 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
+  // Pagination State
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
+  const [total, setTotal] = useState(0)
+  const [totalPages, setTotalPages] = useState(0)
+
   // Shelves State
   const [shelves, setShelves] = useState([])
   const [shelvesLoading, setShelvesLoading] = useState(false)
@@ -89,19 +95,21 @@ export default function Dashboard() {
   // Fetch total books count across entire catalog (unfiltered by shelf)
   const fetchTotalCatalogCount = useCallback(async () => {
     try {
-      const res = await getBooksApi()
-      setTotalCatalogCount(res.data.length)
+      const res = await getBooksApi({ page: 1, page_size: 1 })
+      setTotalCatalogCount(res.data?.total ?? 0)
     } catch (err) {
       console.error('Failed to load total catalog count:', err)
     }
   }, [])
 
-  // Fetch books from backend API
+  // Fetch books from backend API with server-side pagination, filters, search, and sort
   const fetchBooks = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
       const params = {
+        page,
+        page_size: pageSize,
         sort_by: sortBy,
         sort_dir: sortDir,
       }
@@ -110,18 +118,20 @@ export default function Dashboard() {
       if (searchTerm.trim()) params.search = searchTerm.trim()
 
       const res = await getBooksApi(params)
-      setBooks(res.data)
+      setBooks(res.data?.items || [])
+      setTotal(res.data?.total ?? 0)
+      setTotalPages(res.data?.total_pages ?? 0)
 
       // If viewing all books, also keep totalCatalogCount synchronized
       if (!selectedShelfId && !statusFilter && !searchTerm.trim()) {
-        setTotalCatalogCount(res.data.length)
+        setTotalCatalogCount(res.data?.total ?? 0)
       }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load books from server.')
     } finally {
       setLoading(false)
     }
-  }, [selectedShelfId, statusFilter, searchTerm, sortBy, sortDir])
+  }, [page, pageSize, selectedShelfId, statusFilter, searchTerm, sortBy, sortDir])
 
   // Initial load and filter sync
   useEffect(() => {
@@ -196,6 +206,7 @@ export default function Dashboard() {
       // Automatically select newly created shelf
       if (res.data?.id) {
         setSelectedShelfId(res.data.id)
+        setPage(1)
       }
     } else if (shelfModalState.shelf) {
       await updateShelfApi(shelfModalState.shelf.id, data)
@@ -213,6 +224,7 @@ export default function Dashboard() {
       await deleteShelfApi(shelf.id)
       if (selectedShelfId === shelf.id) {
         setSelectedShelfId(null)
+        setPage(1)
       }
       await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
     } catch (err) {
@@ -240,7 +252,7 @@ export default function Dashboard() {
 
   // Calculate statistics from current view
   const stats = {
-    total: books.length,
+    total: selectedShelfId ? total : totalCatalogCount,
     reading: books.filter((b) => b.status === 'reading').length,
     wantToRead: books.filter((b) => b.status === 'want_to_read').length,
     finished: books.filter((b) => b.status === 'finished').length,
@@ -388,7 +400,8 @@ export default function Dashboard() {
 
         // Verify book is still in library
         const catalogCheck = await getBooksApi()
-        cascadeSafetyConfirmed = catalogCheck.data.some((b) => b.id === testBook.id)
+        const catalogItems = catalogCheck.data?.items || catalogCheck.data || []
+        cascadeSafetyConfirmed = catalogItems.some((b) => b.id === testBook.id)
       } else {
         // Clean up created test shelf
         await deleteShelfApi(shelfId)
@@ -470,7 +483,10 @@ export default function Dashboard() {
             shelves={shelves}
             totalBooksCount={totalCatalogCount}
             selectedShelfId={selectedShelfId}
-            onSelectShelf={(id) => setSelectedShelfId(id)}
+            onSelectShelf={(id) => {
+              setSelectedShelfId(id)
+              setPage(1)
+            }}
             onOpenCreateShelf={handleOpenCreateShelf}
             onOpenEditShelf={handleOpenEditShelf}
             onDeleteShelf={handleDeleteShelf}
@@ -499,7 +515,7 @@ export default function Dashboard() {
                       Shelf: {activeShelf.name}
                     </h3>
                     <span className="badge badge-accent">
-                      {books.length} {books.length === 1 ? 'Book' : 'Books'}
+                      {total} {total === 1 ? 'Book' : 'Books'}
                     </span>
                   </div>
                   <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '2px' }}>
@@ -509,7 +525,10 @@ export default function Dashboard() {
                 <button
                   type="button"
                   className="btn-secondary"
-                  onClick={() => setSelectedShelfId(null)}
+                  onClick={() => {
+                    setSelectedShelfId(null)
+                    setPage(1)
+                  }}
                   style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
                 >
                   ✕ View All Books
@@ -571,7 +590,10 @@ export default function Dashboard() {
                     <button
                       key={tab.value}
                       type="button"
-                      onClick={() => setStatusFilter(tab.value)}
+                      onClick={() => {
+                        setStatusFilter(tab.value)
+                        setPage(1)
+                      }}
                       style={{
                         background: statusFilter === tab.value ? 'var(--accent)' : 'transparent',
                         color: statusFilter === tab.value ? 'white' : 'var(--text-secondary)',
@@ -592,7 +614,10 @@ export default function Dashboard() {
                     type="text"
                     placeholder="Search title or author..."
                     value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onChange={(e) => {
+                      setSearchTerm(e.target.value)
+                      setPage(1)
+                    }}
                     style={{ flex: 1, padding: '6px 12px', fontSize: 'var(--font-size-sm)' }}
                   />
 
@@ -602,6 +627,7 @@ export default function Dashboard() {
                       const [field, dir] = e.target.value.split(':')
                       setSortBy(field)
                       setSortDir(dir)
+                      setPage(1)
                     }}
                     style={{ width: 'auto', padding: '6px 10px', fontSize: 'var(--font-size-xs)' }}
                   >
@@ -652,7 +678,13 @@ export default function Dashboard() {
                 </p>
                 {activeShelf ? (
                   <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-sm)' }}>
-                    <button className="btn-secondary" onClick={() => setSelectedShelfId(null)}>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => {
+                        setSelectedShelfId(null)
+                        setPage(1)
+                      }}
+                    >
                       View All Books
                     </button>
                     <button className="btn-primary" onClick={handleOpenAddBookModal}>
@@ -665,6 +697,7 @@ export default function Dashboard() {
                     onClick={() => {
                       setStatusFilter('')
                       setSearchTerm('')
+                      setPage(1)
                     }}
                   >
                     Clear Filters
@@ -676,27 +709,100 @@ export default function Dashboard() {
                 )}
               </div>
             ) : (
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                  gap: 'var(--space-lg)',
-                }}
-              >
-                {books.map((book) => (
-                  <BookCard
-                    key={book.id}
-                    book={book}
-                    onEdit={handleOpenEditBookModal}
-                    onDelete={handleDeleteBook}
-                    onQuickProgress={handleQuickProgress}
-                    onManageShelves={handleOpenAssignModal}
-                    currentShelf={activeShelf}
-                    onRemoveFromShelf={handleRemoveFromShelf}
-                    shelvesMap={shelvesMap}
-                  />
-                ))}
-              </div>
+              <>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                    gap: 'var(--space-lg)',
+                  }}
+                >
+                  {books.map((book) => (
+                    <BookCard
+                      key={book.id}
+                      book={book}
+                      onEdit={handleOpenEditBookModal}
+                      onDelete={handleDeleteBook}
+                      onQuickProgress={handleQuickProgress}
+                      onManageShelves={handleOpenAssignModal}
+                      currentShelf={activeShelf}
+                      onRemoveFromShelf={handleRemoveFromShelf}
+                      shelvesMap={shelvesMap}
+                    />
+                  ))}
+                </div>
+
+                {/* Server-Side Pagination Controls */}
+                {total > 0 && (
+                  <div
+                    className="card"
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 'var(--space-md)',
+                      padding: 'var(--space-md) var(--space-lg)',
+                      marginTop: 'var(--space-sm)',
+                    }}
+                  >
+                    <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+                      Showing{' '}
+                      <strong style={{ color: 'var(--text-primary)' }}>
+                        {(page - 1) * pageSize + 1}
+                      </strong>
+                      –
+                      <strong style={{ color: 'var(--text-primary)' }}>
+                        {Math.min(page * pageSize, total)}
+                      </strong>{' '}
+                      of <strong style={{ color: 'var(--text-primary)' }}>{total}</strong> books
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                        disabled={page <= 1 || loading}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: 'var(--font-size-sm)',
+                          opacity: page <= 1 || loading ? 0.5 : 1,
+                          cursor: page <= 1 || loading ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        ← Previous
+                      </button>
+
+                      <span
+                        style={{
+                          fontSize: 'var(--font-size-sm)',
+                          fontWeight: 600,
+                          color: 'var(--text-primary)',
+                          padding: '0 var(--space-xs)',
+                        }}
+                      >
+                        Page {page} of {totalPages || 1}
+                      </span>
+
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                        disabled={page >= totalPages || loading || totalPages === 0}
+                        style={{
+                          padding: '6px 14px',
+                          fontSize: 'var(--font-size-sm)',
+                          opacity: page >= totalPages || loading || totalPages === 0 ? 0.5 : 1,
+                          cursor: page >= totalPages || loading || totalPages === 0 ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Next →
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>

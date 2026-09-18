@@ -142,13 +142,15 @@ def run_tests():
     log_step("11. Filter catalog by shelf_id")
     resp = client.get(f"/api/books?shelf_id={fav_shelf_id}", headers=auth_a)
     assert_status(resp, 200, "Filter books by Favorites shelf")
-    fav_books = resp.json()
+    raw_fav = resp.json()
+    fav_books = raw_fav.get("items", raw_fav)
     assert len(fav_books) == 1
     assert fav_books[0]["title"] == "Dune"
 
     resp = client.get(f"/api/books?shelf_id={scifi_shelf_id}", headers=auth_a)
     assert_status(resp, 200, "Filter books by Sci-Fi shelf")
-    scifi_books = resp.json()
+    raw_scifi = resp.json()
+    scifi_books = raw_scifi.get("items", raw_scifi)
     assert len(scifi_books) == 2
 
     # 12. Cross-user isolation checks

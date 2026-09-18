@@ -140,21 +140,24 @@ async def run_tests():
         # 5a: Filter by status
         res = await client.get("/books?status=reading", headers=headers_a)
         assert res.status_code == 200
-        reading_books = res.json()
+        data_5a = res.json()
+        reading_books = data_5a.get("items", data_5a)
         assert all(b["status"] == "reading" for b in reading_books)
         print(f"   [OK] Status filter returned {len(reading_books)} reading books")
 
         # 5b: Search by author
         res = await client.get("/books?search=Martin", headers=headers_a)
         assert res.status_code == 200
-        search_res = res.json()
+        data_5b = res.json()
+        search_res = data_5b.get("items", data_5b)
         assert any(b["title"] == "Clean Code" for b in search_res)
         print("   [OK] Search filter successfully matched author 'Robert C. Martin'")
 
         # 5c: Sorting by title asc
         res = await client.get("/books?sort_by=title&sort_dir=asc", headers=headers_a)
         assert res.status_code == 200
-        titles = [b["title"] for b in res.json()]
+        data_5c = res.json()
+        titles = [b["title"] for b in data_5c.get("items", data_5c)]
         assert titles == sorted(titles), "Books should be sorted ascending by title"
         print("   [OK] Standardized sorting (sort_by=title&sort_dir=asc) validated")
 
@@ -178,7 +181,8 @@ async def run_tests():
         # User B list does not contain User A's books
         res = await client.get("/books", headers=headers_b)
         assert res.status_code == 200
-        assert len(res.json()) == 0, "User B should have an empty library"
+        data_b = res.json()
+        assert len(data_b.get("items", data_b)) == 0, "User B should have an empty library"
         print("   [OK] User B library is empty and completely isolated from User A")
 
         # Test 7: Cross-field merge validation during PATCH

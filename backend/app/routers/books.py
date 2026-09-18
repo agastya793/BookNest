@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.book import BookCreate, BookResponse, BookUpdate
+from app.schemas.book import BookCreate, BookResponse, BookUpdate, PaginatedBooksResponse
 from app.services import book_service
 
 router = APIRouter(prefix="/api/books", tags=["Books"])
@@ -34,10 +34,21 @@ def create_book(
 
 @router.get(
     "",
-    response_model=list[BookResponse],
-    summary="List user's books with filtering, search, and sorting",
+    response_model=PaginatedBooksResponse,
+    summary="List user's books with filtering, search, sorting, and pagination",
 )
 def list_books(
+    page: int = Query(
+        1,
+        ge=1,
+        description="Page number (1-indexed, default 1)",
+    ),
+    page_size: int = Query(
+        10,
+        ge=1,
+        le=100,
+        description="Number of books per page (default 10, max 100)",
+    ),
     status: Optional[str] = Query(
         None,
         description="Filter by reading status: want_to_read, reading, finished",
@@ -52,7 +63,7 @@ def list_books(
     ),
     sort_by: str = Query(
         "created_at",
-        description="Field to sort by: created_at, updated_at, title, author, rating, current_page",
+        description="Field to sort by: created_at, date_added, updated_at, title, author, rating, current_page",
     ),
     sort_dir: str = Query(
         "desc",
@@ -62,12 +73,14 @@ def list_books(
     db: Session = Depends(get_db),
 ):
     """
-    List all books belonging to the authenticated user.
-    Supports optional status filtering, shelf filtering, search across title/author, and standardized sorting.
+    List books belonging to the authenticated user.
+    Supports server-side pagination, status filtering, shelf filtering, search across title/author, and standardized sorting.
     """
     return book_service.list_books(
         db=db,
         user_id=current_user.id,
+        page=page,
+        page_size=page_size,
         status_filter=status,
         shelf_id=shelf_id,
         search=search,
