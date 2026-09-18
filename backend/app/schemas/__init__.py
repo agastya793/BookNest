@@ -12,6 +12,15 @@ from app.schemas.book import (
     BookResponse,
     BookStatus,
 )
+from app.schemas.shelf import (
+    ShelfBase,
+    ShelfCreate,
+    ShelfUpdate,
+    ShelfResponse,
+    ShelfDetailResponse,
+    AddBookToShelfRequest,
+    ShelfBookResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -24,4 +33,11 @@ __all__ = [
     "BookUpdate",
     "BookResponse",
     "BookStatus",
+    "ShelfBase",
+    "ShelfCreate",
+    "ShelfUpdate",
+    "ShelfResponse",
+    "ShelfDetailResponse",
+    "AddBookToShelfRequest",
+    "ShelfBookResponse",
 ]

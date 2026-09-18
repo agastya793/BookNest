@@ -1,4 +1,18 @@
-export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
+/**
+ * BookCard Component
+ * Displays book information, reading progress, rating, shelf tags,
+ * quick progress actions, shelf assignment manager, and deletion.
+ */
+export default function BookCard({
+  book,
+  onEdit,
+  onDelete,
+  onQuickProgress,
+  onManageShelves,
+  currentShelf = null,
+  onRemoveFromShelf = null,
+  shelvesMap = {},
+}) {
   const getStatusBadge = (status) => {
     switch (status) {
       case 'reading':
@@ -49,6 +63,11 @@ export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
     })
   }
 
+  // Find names of shelves this book is currently assigned to
+  const assignedShelfNames = (book.shelf_ids || [])
+    .map((shelfId) => shelvesMap[shelfId])
+    .filter(Boolean)
+
   return (
     <div
       className="card"
@@ -62,7 +81,15 @@ export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
     >
       {/* Card Header: Title, Author, and Status Badge */}
       <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-sm)', marginBottom: 'var(--space-xs)' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            gap: 'var(--space-sm)',
+            marginBottom: 'var(--space-xs)',
+          }}
+        >
           <h3
             style={{
               fontSize: 'var(--font-size-lg)',
@@ -75,9 +102,41 @@ export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
           </h3>
           <div style={{ flexShrink: 0 }}>{getStatusBadge(book.status)}</div>
         </div>
+
         <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', marginBottom: 'var(--space-sm)' }}>
           by <strong>{book.author}</strong>
         </div>
+
+        {/* Shelf Chips / Badges */}
+        {assignedShelfNames.length > 0 && (
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '4px',
+              marginBottom: 'var(--space-sm)',
+            }}
+          >
+            {assignedShelfNames.map((name, idx) => (
+              <span
+                key={idx}
+                style={{
+                  fontSize: '0.7rem',
+                  padding: '2px 8px',
+                  borderRadius: '100px',
+                  background: 'var(--bg-secondary)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '3px',
+                }}
+              >
+                📁 {name}
+              </span>
+            ))}
+          </div>
+        )}
 
         {/* Rating and Finished Date */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
@@ -91,7 +150,15 @@ export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
 
         {/* Reading Progress */}
         <div style={{ marginTop: 'var(--space-sm)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--text-secondary)',
+              marginBottom: '4px',
+            }}
+          >
             <span>
               Page {book.current_page}
               {book.total_pages ? ` of ${book.total_pages}` : ''}
@@ -156,7 +223,7 @@ export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
           gap: 'var(--space-xs)',
         }}
       >
-        {/* Quick Progress Buttons (when reading or want to read) */}
+        {/* Quick Progress Buttons */}
         {book.status !== 'finished' && (
           <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
             <button
@@ -180,24 +247,64 @@ export default function BookCard({ book, onEdit, onDelete, onQuickProgress }) {
           </div>
         )}
 
-        {/* Edit and Delete Buttons */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-sm)' }}>
+        {/* Contextual "Remove from Shelf" Button when viewing an active shelf */}
+        {currentShelf && onRemoveFromShelf && (
           <button
             type="button"
             className="btn-secondary"
-            onClick={() => onEdit(book)}
-            style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+            onClick={() => onRemoveFromShelf(currentShelf.id, book.id, book.title, currentShelf.name)}
+            style={{
+              padding: '5px 10px',
+              fontSize: 'var(--font-size-xs)',
+              color: 'var(--warning)',
+              borderColor: 'rgba(245, 158, 11, 0.3)',
+              marginBottom: 'var(--space-xs)',
+              justifyContent: 'center',
+            }}
+            title={`Remove "${book.title}" from "${currentShelf.name}" (keeps book in your library)`}
           >
-            Edit
+            ✕ Remove from "{currentShelf.name}"
           </button>
+        )}
+
+        {/* Manage Shelves, Edit, and Delete Actions */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-xs)' }}>
+          {/* Manage Shelves Button */}
           <button
             type="button"
-            className="btn-danger"
-            onClick={() => onDelete(book.id, book.title)}
-            style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+            className="btn-secondary"
+            onClick={() => onManageShelves && onManageShelves(book)}
+            style={{
+              padding: '4px 8px',
+              fontSize: 'var(--font-size-xs)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+            title="Assign book to custom shelves"
           >
-            Delete
+            <span>📁</span> Shelves
           </button>
+
+          {/* Edit and Delete Buttons */}
+          <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => onEdit(book)}
+              style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              className="btn-danger"
+              onClick={() => onDelete(book.id, book.title)}
+              style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+            >
+              Delete
+            </button>
+          </div>
         </div>
       </div>
     </div>

@@ -42,6 +42,10 @@ def list_books(
         None,
         description="Filter by reading status: want_to_read, reading, finished",
     ),
+    shelf_id: Optional[UUID] = Query(
+        None,
+        description="Filter books belonging to a specific custom shelf",
+    ),
     search: Optional[str] = Query(
         None,
         description="Case-insensitive keyword search against title or author",
@@ -59,12 +63,13 @@ def list_books(
 ):
     """
     List all books belonging to the authenticated user.
-    Supports optional status filtering, search across title/author, and standardized sorting.
+    Supports optional status filtering, shelf filtering, search across title/author, and standardized sorting.
     """
     return book_service.list_books(
         db=db,
         user_id=current_user.id,
         status_filter=status,
+        shelf_id=shelf_id,
         search=search,
         sort_by=sort_by,
         sort_dir=sort_dir,

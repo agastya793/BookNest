@@ -88,6 +88,7 @@ class BookResponse(BaseModel):
     finished_date: Optional[datetime]
     created_at: datetime
     updated_at: datetime
+    shelf_ids: list[UUID] = Field(default_factory=list)
 
     # Pydantic v2 ORM mapping from SQLAlchemy Book entity
     model_config = ConfigDict(from_attributes=True)

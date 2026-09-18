@@ -173,6 +173,19 @@ button:disabled {
   padding: 0 var(--space-lg);
 }
 
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: var(--space-lg);
+  align-items: start;
+}
+
+@media (max-width: 820px) {
+  .dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
 .flex {
   display: flex;
 }

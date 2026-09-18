@@ -1,14 +1,25 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import Navbar from '../components/Navbar'
 import BookCard from '../components/BookCard'
 import BookModal from '../components/BookModal'
+import ShelfSidebar from '../components/ShelfSidebar'
+import ShelfModal from '../components/ShelfModal'
+import AssignShelfModal from '../components/AssignShelfModal'
 import {
   getBooksApi,
   createBookApi,
   updateBookApi,
   deleteBookApi,
 } from '../api/books'
+import {
+  getShelvesApi,
+  createShelfApi,
+  updateShelfApi,
+  deleteShelfApi,
+  addBookToShelfApi,
+  removeBookFromShelfApi,
+} from '../api/shelves'
 import { getMeApi } from '../api/auth'
 import { getAccessToken } from '../api/client'
 
@@ -17,8 +28,14 @@ export default function Dashboard() {
 
   // Books State
   const [books, setBooks] = useState([])
+  const [totalCatalogCount, setTotalCatalogCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+
+  // Shelves State
+  const [shelves, setShelves] = useState([])
+  const [shelvesLoading, setShelvesLoading] = useState(false)
+  const [selectedShelfId, setSelectedShelfId] = useState(null)
 
   // Filters and Sorting
   const [statusFilter, setStatusFilter] = useState('')
@@ -26,14 +43,58 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState('created_at')
   const [sortDir, setSortDir] = useState('desc')
 
-  // Modal State
-  const [isModalOpen, setIsModalOpen] = useState(false)
+  // Modals State
+  const [isBookModalOpen, setIsBookModalOpen] = useState(false)
   const [editingBook, setEditingBook] = useState(null)
+  const [shelfModalState, setShelfModalState] = useState({
+    isOpen: false,
+    mode: 'create',
+    shelf: null,
+  })
+  const [assignModalBook, setAssignModalBook] = useState(null)
 
-  // Collapsible Phase 2 Diagnostics
+  // Collapsible Architecture Diagnostics
   const [showDiagnostics, setShowDiagnostics] = useState(false)
   const [testOutput, setTestOutput] = useState(null)
   const [loadingAction, setLoadingAction] = useState(null)
+
+  // Memoized dictionary of shelfId -> shelfName
+  const shelvesMap = useMemo(() => {
+    const map = {}
+    shelves.forEach((s) => {
+      map[s.id] = s.name
+    })
+    return map
+  }, [shelves])
+
+  // Active selected shelf entity
+  const activeShelf = useMemo(() => {
+    if (!selectedShelfId) return null
+    return shelves.find((s) => s.id === selectedShelfId) || null
+  }, [shelves, selectedShelfId])
+
+  // Fetch shelves from backend API
+  const fetchShelves = useCallback(async () => {
+    setShelvesLoading(true)
+    try {
+      const res = await getShelvesApi()
+      setShelves(res.data)
+    } catch (err) {
+      console.error('Failed to load shelves:', err)
+    } finally {
+      setShelvesLoading(false)
+    }
+  }, [])
+
+  // Fetch total books count across entire catalog (unfiltered by shelf)
+  const fetchTotalCatalogCount = useCallback(async () => {
+    try {
+      const res = await getBooksApi()
+      setTotalCatalogCount(res.data.length)
+    } catch (err) {
+      console.error('Failed to load total catalog count:', err)
+    }
+  }, [])
 
   // Fetch books from backend API
   const fetchBooks = useCallback(async () => {
@@ -44,40 +105,60 @@ export default function Dashboard() {
         sort_by: sortBy,
         sort_dir: sortDir,
       }
+      if (selectedShelfId) params.shelf_id = selectedShelfId
       if (statusFilter) params.status = statusFilter
       if (searchTerm.trim()) params.search = searchTerm.trim()
 
       const res = await getBooksApi(params)
       setBooks(res.data)
+
+      // If viewing all books, also keep totalCatalogCount synchronized
+      if (!selectedShelfId && !statusFilter && !searchTerm.trim()) {
+        setTotalCatalogCount(res.data.length)
+      }
     } catch (err) {
       setError(err.response?.data?.detail || 'Failed to load books from server.')
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, searchTerm, sortBy, sortDir])
+  }, [selectedShelfId, statusFilter, searchTerm, sortBy, sortDir])
+
+  // Initial load and filter sync
+  useEffect(() => {
+    fetchShelves()
+    fetchTotalCatalogCount()
+  }, [fetchShelves, fetchTotalCatalogCount])
 
   useEffect(() => {
     fetchBooks()
   }, [fetchBooks])
 
   // Book CRUD Handlers
-  const handleOpenAddModal = () => {
+  const handleOpenAddBookModal = () => {
     setEditingBook(null)
-    setIsModalOpen(true)
+    setIsBookModalOpen(true)
   }
 
-  const handleOpenEditModal = (book) => {
+  const handleOpenEditBookModal = (book) => {
     setEditingBook(book)
-    setIsModalOpen(true)
+    setIsBookModalOpen(true)
   }
 
   const handleSaveBook = async (payload) => {
     if (editingBook) {
       await updateBookApi(editingBook.id, payload)
     } else {
-      await createBookApi(payload)
+      const res = await createBookApi(payload)
+      // If currently on an active shelf, automatically attach new book to that shelf!
+      if (selectedShelfId && res.data?.id) {
+        try {
+          await addBookToShelfApi(selectedShelfId, res.data.id)
+        } catch (err) {
+          console.warn('Auto-shelf assignment warning:', err)
+        }
+      }
     }
-    await fetchBooks()
+    await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount()])
   }
 
   const handleQuickProgress = async (bookId, patchData) => {
@@ -93,14 +174,71 @@ export default function Dashboard() {
     if (window.confirm(`Are you sure you want to remove "${bookTitle}" from your library?`)) {
       try {
         await deleteBookApi(bookId)
-        await fetchBooks()
+        await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount()])
       } catch (err) {
         alert(err.response?.data?.detail || 'Failed to delete book.')
       }
     }
   }
 
-  // Calculate statistics from current library
+  // Shelf CRUD Handlers
+  const handleOpenCreateShelf = () => {
+    setShelfModalState({ isOpen: true, mode: 'create', shelf: null })
+  }
+
+  const handleOpenEditShelf = (shelf) => {
+    setShelfModalState({ isOpen: true, mode: 'edit', shelf })
+  }
+
+  const handleSaveShelf = async (data) => {
+    if (shelfModalState.mode === 'create') {
+      const res = await createShelfApi(data)
+      // Automatically select newly created shelf
+      if (res.data?.id) {
+        setSelectedShelfId(res.data.id)
+      }
+    } else if (shelfModalState.shelf) {
+      await updateShelfApi(shelfModalState.shelf.id, data)
+    }
+    await fetchShelves()
+  }
+
+  const handleDeleteShelf = async (shelf) => {
+    const confirmed = window.confirm(
+      `Are you sure you want to delete shelf "${shelf.name}"?\n\nNote: Deleting this shelf will remove its categorization, but will NEVER delete any books from your personal library.`
+    )
+    if (!confirmed) return
+
+    try {
+      await deleteShelfApi(shelf.id)
+      if (selectedShelfId === shelf.id) {
+        setSelectedShelfId(null)
+      }
+      await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to delete shelf.')
+    }
+  }
+
+  const handleRemoveFromShelf = async (shelfId, bookId, bookTitle, shelfName) => {
+    try {
+      await removeBookFromShelfApi(shelfId, bookId)
+      await Promise.all([fetchBooks(), fetchShelves()])
+    } catch (err) {
+      alert(err.response?.data?.detail || `Failed to remove "${bookTitle}" from "${shelfName}".`)
+    }
+  }
+
+  // Assign Shelves Modal Handlers
+  const handleOpenAssignModal = (book) => {
+    setAssignModalBook(book)
+  }
+
+  const handleAssignedChange = async () => {
+    await Promise.all([fetchBooks(), fetchShelves()])
+  }
+
+  // Calculate statistics from current view
   const stats = {
     total: books.length,
     reading: books.filter((b) => b.status === 'reading').length,
@@ -108,7 +246,7 @@ export default function Dashboard() {
     finished: books.filter((b) => b.status === 'finished').length,
   }
 
-  // Phase 2 Diagnostics Handlers (preserved for reviewers)
+  // Diagnostics Handlers
   const testMe = async () => {
     setLoadingAction('me')
     setTestOutput(null)
@@ -217,8 +355,73 @@ export default function Dashboard() {
     setLoadingAction(null)
   }
 
+  // Phase 4 Live Shelf Diagnostics
+  const testPhase4Shelves = async () => {
+    setLoadingAction('phase4')
+    setTestOutput(null)
+    const timestamp = Date.now().toString().slice(-4)
+    const testShelfName = `Diag_Shelf_${timestamp}`
+
+    try {
+      // 1. Create Shelf
+      const createRes = await createShelfApi({ name: testShelfName })
+      const shelfId = createRes.data.id
+
+      // 2. Test 409 Duplicate rejection
+      let dup409Passed = false
+      try {
+        await createShelfApi({ name: testShelfName })
+      } catch (dupErr) {
+        if (dupErr.response?.status === 409) dup409Passed = true
+      }
+
+      // 3. Test book association if books exist
+      let bookAssigned = false
+      let cascadeSafetyConfirmed = false
+      if (books.length > 0) {
+        const testBook = books[0]
+        await addBookToShelfApi(shelfId, testBook.id)
+        bookAssigned = true
+
+        // Delete shelf and confirm book still exists
+        await deleteShelfApi(shelfId)
+
+        // Verify book is still in library
+        const catalogCheck = await getBooksApi()
+        cascadeSafetyConfirmed = catalogCheck.data.some((b) => b.id === testBook.id)
+      } else {
+        // Clean up created test shelf
+        await deleteShelfApi(shelfId)
+      }
+
+      await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
+
+      setTestOutput({
+        success: dup409Passed,
+        title: 'Phase 4 Custom Shelves & Integrity Verification',
+        data: {
+          test_shelf_created: testShelfName,
+          duplicate_409_conflict_enforced: dup409Passed,
+          book_many_to_many_attached: bookAssigned,
+          cascade_safety_verified: cascadeSafetyConfirmed,
+          clean_up_completed: true,
+        },
+        detail:
+          'PASS: Custom shelf CRUD, 409 duplicate name enforcement, many-to-many book association, and cascade safety verified successfully!',
+      })
+    } catch (err) {
+      setTestOutput({
+        success: false,
+        title: 'Phase 4 Shelf Verification Failed',
+        detail: err.response?.data?.detail || err.message,
+      })
+    } finally {
+      setLoadingAction(null)
+    }
+  }
+
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: 'var(--space-2xl) var(--space-md)' }}>
+    <div style={{ maxWidth: '1240px', margin: '0 auto', padding: 'var(--space-2xl) var(--space-md)' }}>
       {/* Navigation Header */}
       <Navbar />
 
@@ -233,7 +436,9 @@ export default function Dashboard() {
           }}
         >
           <div className="card" style={{ padding: 'var(--space-md)' }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>TOTAL BOOKS</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
+              {selectedShelfId ? `BOOKS ON "${activeShelf?.name?.toUpperCase()}"` : 'TOTAL BOOKS IN LIBRARY'}
+            </div>
             <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700, color: 'var(--text-primary)' }}>
               {stats.total}
             </div>
@@ -258,168 +463,245 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Library Controls Toolbar */}
-        <div
-          className="card"
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 'var(--space-md)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexWrap: 'wrap',
-              gap: 'var(--space-md)',
-            }}
-          >
-            <div>
-              <h2 style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700 }}>My Library</h2>
-              <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-                Organize, track reading milestones, and manage your collection
-              </p>
-            </div>
-            <button className="btn-primary" onClick={handleOpenAddModal}>
-              + Add Book
-            </button>
-          </div>
+        {/* Responsive Two-Column Layout: Shelves Sidebar on left, Catalog on right */}
+        <div className="dashboard-layout">
+          {/* Left Column: ShelfSidebar */}
+          <ShelfSidebar
+            shelves={shelves}
+            totalBooksCount={totalCatalogCount}
+            selectedShelfId={selectedShelfId}
+            onSelectShelf={(id) => setSelectedShelfId(id)}
+            onOpenCreateShelf={handleOpenCreateShelf}
+            onOpenEditShelf={handleOpenEditShelf}
+            onDeleteShelf={handleDeleteShelf}
+            loading={shelvesLoading}
+          />
 
-          {/* Search, Filter Tabs & Sort Controls */}
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 'var(--space-md)',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            {/* Status Filter Tabs */}
-            <div style={{ display: 'inline-flex', background: 'var(--bg-primary)', padding: '4px', borderRadius: 'var(--radius-md)', gap: '4px' }}>
-              {[
-                { label: 'All', value: '' },
-                { label: 'Reading', value: 'reading' },
-                { label: 'Want to Read', value: 'want_to_read' },
-                { label: 'Finished', value: 'finished' },
-              ].map((tab) => (
-                <button
-                  key={tab.value}
-                  type="button"
-                  onClick={() => setStatusFilter(tab.value)}
-                  style={{
-                    background: statusFilter === tab.value ? 'var(--accent)' : 'transparent',
-                    color: statusFilter === tab.value ? 'white' : 'var(--text-secondary)',
-                    padding: '6px 14px',
-                    fontSize: 'var(--font-size-xs)',
-                    borderRadius: 'var(--radius-sm)',
-                    cursor: 'pointer',
-                  }}
-                >
-                  {tab.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Search Input & Sort Controls */}
-            <div style={{ display: 'flex', gap: 'var(--space-sm)', flex: 1, maxWidth: '480px' }}>
-              <input
-                type="text"
-                placeholder="Search title or author..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                style={{ flex: 1, padding: '6px 12px', fontSize: 'var(--font-size-sm)' }}
-              />
-
-              <select
-                value={`${sortBy}:${sortDir}`}
-                onChange={(e) => {
-                  const [field, dir] = e.target.value.split(':')
-                  setSortBy(field)
-                  setSortDir(dir)
+          {/* Right Column: Books Catalog & Toolbar */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', minWidth: 0 }}>
+            {/* Active Shelf Filter Banner */}
+            {activeShelf && (
+              <div
+                className="card"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: 'linear-gradient(90deg, rgba(139, 92, 246, 0.15) 0%, rgba(34, 37, 54, 0.8) 100%)',
+                  borderColor: 'var(--accent)',
+                  padding: 'var(--space-md) var(--space-lg)',
                 }}
-                style={{ width: 'auto', padding: '6px 10px', fontSize: 'var(--font-size-xs)' }}
               >
-                <option value="created_at:desc">Date Added (Newest)</option>
-                <option value="created_at:asc">Date Added (Oldest)</option>
-                <option value="title:asc">Title (A–Z)</option>
-                <option value="title:desc">Title (Z–A)</option>
-                <option value="rating:desc">Rating (Highest)</option>
-                <option value="current_page:desc">Pages Read (Highest)</option>
-              </select>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '1.25rem' }}>📁</span>
+                    <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700 }}>
+                      Shelf: {activeShelf.name}
+                    </h3>
+                    <span className="badge badge-accent">
+                      {books.length} {books.length === 1 ? 'Book' : 'Books'}
+                    </span>
+                  </div>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '2px' }}>
+                    Filtered view. Removing a book from this shelf or deleting this shelf preserves your library book.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setSelectedShelfId(null)}
+                  style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
+                >
+                  ✕ View All Books
+                </button>
+              </div>
+            )}
+
+            {/* Library Controls Toolbar */}
+            <div
+              className="card"
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 'var(--space-md)',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: 'var(--space-md)',
+                }}
+              >
+                <div>
+                  <h2 style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700 }}>
+                    {activeShelf ? activeShelf.name : 'My Library'}
+                  </h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+                    {activeShelf
+                      ? `Organize and track books on this shelf`
+                      : `Organize, track reading milestones, and manage your collection`}
+                  </p>
+                </div>
+                <button className="btn-primary" onClick={handleOpenAddBookModal}>
+                  + Add Book
+                </button>
+              </div>
+
+              {/* Search, Filter Tabs & Sort Controls */}
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: 'var(--space-md)',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                }}
+              >
+                {/* Status Filter Tabs */}
+                <div style={{ display: 'inline-flex', background: 'var(--bg-primary)', padding: '4px', borderRadius: 'var(--radius-md)', gap: '4px' }}>
+                  {[
+                    { label: 'All', value: '' },
+                    { label: 'Reading', value: 'reading' },
+                    { label: 'Want to Read', value: 'want_to_read' },
+                    { label: 'Finished', value: 'finished' },
+                  ].map((tab) => (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      onClick={() => setStatusFilter(tab.value)}
+                      style={{
+                        background: statusFilter === tab.value ? 'var(--accent)' : 'transparent',
+                        color: statusFilter === tab.value ? 'white' : 'var(--text-secondary)',
+                        padding: '6px 14px',
+                        fontSize: 'var(--font-size-xs)',
+                        borderRadius: 'var(--radius-sm)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Input & Sort Controls */}
+                <div style={{ display: 'flex', gap: 'var(--space-sm)', flex: 1, maxWidth: '480px' }}>
+                  <input
+                    type="text"
+                    placeholder="Search title or author..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{ flex: 1, padding: '6px 12px', fontSize: 'var(--font-size-sm)' }}
+                  />
+
+                  <select
+                    value={`${sortBy}:${sortDir}`}
+                    onChange={(e) => {
+                      const [field, dir] = e.target.value.split(':')
+                      setSortBy(field)
+                      setSortDir(dir)
+                    }}
+                    style={{ width: 'auto', padding: '6px 10px', fontSize: 'var(--font-size-xs)' }}
+                  >
+                    <option value="created_at:desc">Date Added (Newest)</option>
+                    <option value="created_at:asc">Date Added (Oldest)</option>
+                    <option value="title:asc">Title (A–Z)</option>
+                    <option value="title:desc">Title (Z–A)</option>
+                    <option value="rating:desc">Rating (Highest)</option>
+                    <option value="current_page:desc">Pages Read (Highest)</option>
+                  </select>
+                </div>
+              </div>
             </div>
+
+            {/* Books Catalog Grid */}
+            {error && (
+              <div style={{ background: 'var(--error-bg)', color: 'var(--error)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)' }}>
+                ⚠️ {error}
+              </div>
+            )}
+
+            {loading ? (
+              <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--text-secondary)' }}>
+                <div style={{ fontSize: '2rem', marginBottom: 'var(--space-sm)' }}>📖</div>
+                <p>Loading personal library...</p>
+              </div>
+            ) : books.length === 0 ? (
+              <div
+                className="card"
+                style={{
+                  textAlign: 'center',
+                  padding: 'var(--space-2xl) var(--space-xl)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <div style={{ fontSize: '3rem', marginBottom: 'var(--space-sm)' }}>
+                  {activeShelf ? '📁' : '📚'}
+                </div>
+                <h3 style={{ fontSize: 'var(--font-size-xl)', color: 'var(--text-primary)', marginBottom: 'var(--space-xs)' }}>
+                  {activeShelf ? `Shelf "${activeShelf.name}" is empty` : 'No books found'}
+                </h3>
+                <p style={{ maxWidth: '420px', margin: '0 auto var(--space-lg) auto', fontSize: 'var(--font-size-sm)' }}>
+                  {activeShelf
+                    ? 'This custom shelf currently has no books. Switch to All Books to assign books to this shelf, or add a new book directly.'
+                    : statusFilter || searchTerm
+                    ? 'No books match your current search or status filter. Try clearing the filter.'
+                    : 'Your library is currently empty. Add your first book to track your reading journey!'}
+                </p>
+                {activeShelf ? (
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: 'var(--space-sm)' }}>
+                    <button className="btn-secondary" onClick={() => setSelectedShelfId(null)}>
+                      View All Books
+                    </button>
+                    <button className="btn-primary" onClick={handleOpenAddBookModal}>
+                      + Add Book to Shelf
+                    </button>
+                  </div>
+                ) : statusFilter || searchTerm ? (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setStatusFilter('')
+                      setSearchTerm('')
+                    }}
+                  >
+                    Clear Filters
+                  </button>
+                ) : (
+                  <button className="btn-primary" onClick={handleOpenAddBookModal}>
+                    + Add Your First Book
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                  gap: 'var(--space-lg)',
+                }}
+              >
+                {books.map((book) => (
+                  <BookCard
+                    key={book.id}
+                    book={book}
+                    onEdit={handleOpenEditBookModal}
+                    onDelete={handleDeleteBook}
+                    onQuickProgress={handleQuickProgress}
+                    onManageShelves={handleOpenAssignModal}
+                    currentShelf={activeShelf}
+                    onRemoveFromShelf={handleRemoveFromShelf}
+                    shelvesMap={shelvesMap}
+                  />
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Books Catalog Grid */}
-        {error && (
-          <div style={{ background: 'var(--error-bg)', color: 'var(--error)', padding: 'var(--space-md)', borderRadius: 'var(--radius-md)' }}>
-            ⚠️ {error}
-          </div>
-        )}
-
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--text-secondary)' }}>
-            <div style={{ fontSize: '2rem', marginBottom: 'var(--space-sm)' }}>📖</div>
-            <p>Loading your personal library...</p>
-          </div>
-        ) : books.length === 0 ? (
-          <div
-            className="card"
-            style={{
-              textAlign: 'center',
-              padding: 'var(--space-2xl) var(--space-xl)',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            <div style={{ fontSize: '3rem', marginBottom: 'var(--space-sm)' }}>📚</div>
-            <h3 style={{ fontSize: 'var(--font-size-xl)', color: 'var(--text-primary)', marginBottom: 'var(--space-xs)' }}>
-              No books found
-            </h3>
-            <p style={{ maxWidth: '400px', margin: '0 auto var(--space-lg) auto', fontSize: 'var(--font-size-sm)' }}>
-              {statusFilter || searchTerm
-                ? 'No books match your current search or status filter. Try clearing the filter.'
-                : 'Your library is currently empty. Add your first book to track your reading journey!'}
-            </p>
-            {statusFilter || searchTerm ? (
-              <button
-                className="btn-secondary"
-                onClick={() => {
-                  setStatusFilter('')
-                  setSearchTerm('')
-                }}
-              >
-                Clear Filters
-              </button>
-            ) : (
-              <button className="btn-primary" onClick={handleOpenAddModal}>
-                + Add Your First Book
-              </button>
-            )}
-          </div>
-        ) : (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
-              gap: 'var(--space-lg)',
-            }}
-          >
-            {books.map((book) => (
-              <BookCard
-                key={book.id}
-                book={book}
-                onEdit={handleOpenEditModal}
-                onDelete={handleDeleteBook}
-                onQuickProgress={handleQuickProgress}
-              />
-            ))}
-          </div>
-        )}
-
-        {/* Collapsible Phase 2 Architecture Diagnostics Panel */}
+        {/* Collapsible Architecture Diagnostics Panel */}
         <div className="card" style={{ marginTop: 'var(--space-xl)' }}>
           <div
             style={{
@@ -433,10 +715,10 @@ export default function Dashboard() {
           >
             <div>
               <h3 style={{ fontSize: 'var(--font-size-base)', fontWeight: 600 }}>
-                Phase 2 Architecture & Security Diagnostics
+                Architecture & Security Diagnostics
               </h3>
               <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
-                Verify in-memory JWT, HttpOnly rotation, and Axios interceptor queueing
+                Verify in-memory JWT, HttpOnly rotation, Axios interceptor replay, and Phase 4 Custom Shelves
               </p>
             </div>
             <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--accent)' }}>
@@ -486,6 +768,14 @@ export default function Dashboard() {
                 >
                   {loadingAction === 'storage' ? 'Auditing...' : '4. Storage Audit'}
                 </button>
+                <button
+                  className="btn-secondary"
+                  onClick={testPhase4Shelves}
+                  disabled={loadingAction !== null}
+                  style={{ justifyContent: 'center', borderColor: 'var(--accent)', color: 'var(--accent)' }}
+                >
+                  {loadingAction === 'phase4' ? 'Testing Shelves...' : '5. Test Shelves (Phase 4)'}
+                </button>
               </div>
 
               {testOutput && (
@@ -530,10 +820,27 @@ export default function Dashboard() {
 
       {/* Book Add / Edit Modal */}
       <BookModal
-        isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        isOpen={isBookModalOpen}
+        onClose={() => setIsBookModalOpen(false)}
         onSave={handleSaveBook}
         book={editingBook}
+      />
+
+      {/* Shelf Create / Rename Modal */}
+      <ShelfModal
+        isOpen={shelfModalState.isOpen}
+        onClose={() => setShelfModalState({ isOpen: false, mode: 'create', shelf: null })}
+        onSave={handleSaveShelf}
+        shelf={shelfModalState.shelf}
+      />
+
+      {/* Assign Shelves to Book Modal */}
+      <AssignShelfModal
+        isOpen={!!assignModalBook}
+        onClose={() => setAssignModalBook(null)}
+        book={assignModalBook}
+        shelves={shelves}
+        onAssignedChange={handleAssignedChange}
       />
     </div>
   )

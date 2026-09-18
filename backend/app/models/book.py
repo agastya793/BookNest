@@ -53,5 +53,9 @@ class Book(Base):
         "Lending", back_populates="book", cascade="all, delete-orphan"
     )
 
+    @property
+    def shelf_ids(self) -> list[uuid.UUID]:
+        return [sb.shelf_id for sb in self.shelf_books]
+
     def __repr__(self):
         return f"<Book {self.title} by {self.author}>"

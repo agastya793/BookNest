@@ -2,9 +2,11 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 from fastapi import HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models.book import Book
+from app.models.shelf import Shelf
+from app.models.shelf_book import ShelfBook
 from app.schemas.book import BookCreate, BookUpdate
 
 
@@ -22,11 +24,19 @@ def create_book(db: Session, user_id: UUID, book_in: BookCreate) -> Book:
         finished_date = datetime.now(timezone.utc)
         if book_data.get("total_pages") is not None and book_data.get("current_page", 0) == 0:
             book_data["current_page"] = book_data["total_pages"]
+        elif book_data.get("total_pages") is not None and book_data.get("current_page", 0) > 0:
+            pass
 
     book = Book(
         user_id=user_id,
+        title=book_data["title"],
+        author=book_data["author"],
+        status=book_data["status"],
+        total_pages=book_data.get("total_pages"),
+        current_page=book_data.get("current_page", 0),
+        rating=book_data.get("rating"),
+        notes=book_data.get("notes"),
         finished_date=finished_date,
-        **book_data,
     )
     db.add(book)
     db.commit()
@@ -36,11 +46,12 @@ def create_book(db: Session, user_id: UUID, book_in: BookCreate) -> Book:
 
 def get_book(db: Session, user_id: UUID, book_id: UUID) -> Book:
     """
-    Fetch a single book by ID strictly scoping ownership to the authenticated user.
+    Retrieve a book by ID ensuring ownership by user_id.
     Raises 404 Not Found if missing or belonging to another user.
     """
     book = (
         db.query(Book)
+        .options(selectinload(Book.shelf_books))
         .filter(Book.id == book_id, Book.user_id == user_id)
         .first()
     )
@@ -56,15 +67,37 @@ def list_books(
     db: Session,
     user_id: UUID,
     status_filter: Optional[str] = None,
+    shelf_id: Optional[UUID] = None,
     search: Optional[str] = None,
     sort_by: str = "created_at",
     sort_dir: str = "desc",
 ) -> list[Book]:
     """
     List books belonging to the authenticated user with status filtering,
-    case-insensitive search against title/author, and standardized sorting.
+    optional shelf filtering, case-insensitive search against title/author,
+    and standardized sorting.
     """
-    query = db.query(Book).filter(Book.user_id == user_id)
+    query = (
+        db.query(Book)
+        .options(selectinload(Book.shelf_books))
+        .filter(Book.user_id == user_id)
+    )
+
+    # Optional shelf filter
+    if shelf_id:
+        shelf = (
+            db.query(Shelf)
+            .filter(Shelf.id == shelf_id, Shelf.user_id == user_id)
+            .first()
+        )
+        if not shelf:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Shelf not found",
+            )
+        query = query.join(ShelfBook, ShelfBook.book_id == Book.id).filter(
+            ShelfBook.shelf_id == shelf_id
+        )
 
     # Optional status filter
     if status_filter:

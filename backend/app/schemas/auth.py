@@ -11,16 +11,16 @@ SPECIAL_CHAR_REGEX = re.compile(f"[{re.escape('!@#$%^&*()_+-=[]{}|;:,.<>?')}]")
 
 class UserCreate(BaseModel):
     """Schema for user registration."""
-    name: str = Field(..., min_length=1, max_length=100, description="User's full name")
+    name: str = Field(default="BookNest User", max_length=100, description="User's full name")
     email: EmailStr = Field(..., description="Valid email address")
     password: str = Field(..., description="User's password meeting complexity rules")
 
     @field_validator("name")
     @classmethod
     def validate_name(cls, v: str) -> str:
-        trimmed = v.strip()
+        trimmed = v.strip() if v else ""
         if not trimmed:
-            raise ValueError("Name cannot be empty or whitespace only")
+            return "BookNest User"
         return trimmed
 
     @field_validator("password")
