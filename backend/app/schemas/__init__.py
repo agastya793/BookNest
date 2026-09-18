@@ -5,6 +5,13 @@ from app.schemas.auth import (
     TokenResponse,
     MessageResponse,
 )
+from app.schemas.book import (
+    BookBase,
+    BookCreate,
+    BookUpdate,
+    BookResponse,
+    BookStatus,
+)
 
 __all__ = [
     "UserCreate",
@@ -12,4 +19,9 @@ __all__ = [
     "UserResponse",
     "TokenResponse",
     "MessageResponse",
+    "BookBase",
+    "BookCreate",
+    "BookUpdate",
+    "BookResponse",
+    "BookStatus",
 ]

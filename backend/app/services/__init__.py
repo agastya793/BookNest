@@ -7,6 +7,7 @@ from app.services.auth_service import (
     rotate_refresh_token,
     revoke_refresh_token,
 )
+from app.services import book_service
 
 __all__ = [
     "hash_password",
@@ -16,4 +17,5 @@ __all__ = [
     "create_refresh_token",
     "rotate_refresh_token",
     "revoke_refresh_token",
+    "book_service",
 ]
