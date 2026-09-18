@@ -1,1 +1,19 @@
-# Services package — Shared business logic helpers will be added per phase
+from app.services.auth_service import (
+    hash_password,
+    verify_password,
+    hash_token,
+    create_access_token,
+    create_refresh_token,
+    rotate_refresh_token,
+    revoke_refresh_token,
+)
+
+__all__ = [
+    "hash_password",
+    "verify_password",
+    "hash_token",
+    "create_access_token",
+    "create_refresh_token",
+    "rotate_refresh_token",
+    "revoke_refresh_token",
+]

@@ -1,1 +1,3 @@
-# Routers package — API endpoint modules will be added per phase
+from app.routers import auth
+
+__all__ = ["auth"]

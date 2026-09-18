@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
+from app.routers import auth
 
 app = FastAPI(title="BookNest API", version="1.0.0")
 
@@ -13,8 +14,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Mount modular routers
+app.include_router(auth.router)
 
-@app.get("/api/health")
+
+@app.get("/api/health", tags=["Health"])
 def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
+

@@ -1,1 +1,15 @@
-# Schemas package — Pydantic request/response models will be added per phase
+from app.schemas.auth import (
+    UserCreate,
+    UserLogin,
+    UserResponse,
+    TokenResponse,
+    MessageResponse,
+)
+
+__all__ = [
+    "UserCreate",
+    "UserLogin",
+    "UserResponse",
+    "TokenResponse",
+    "MessageResponse",
+]
