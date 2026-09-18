@@ -13,6 +13,7 @@ BookNest is an application built for managing books, tracking reading milestones
 * **Phase 1 (Project Scaffold & Database Layer):** Complete backend application skeleton, SQLAlchemy 2.0 ORM models, Alembic migrations executed against PostgreSQL, Vite + React frontend configuration with Axios client and local proxy, and design tokens.
 * **Phase 2 (Authentication Layer):** Complete JWT access tokens in React memory, HttpOnly refresh cookies, SHA-256 token hashing, SELECT FOR UPDATE rotation concurrency safety, password policy enforcement, Axios 401 interceptor replay queue, and React Router protected routing.
 * **Phase 3 (Book Management & Personal Library CRUD):** Complete personal book cataloging, Pydantic v2 cross-field validation, computed progress_percentage, status lifecycle management, strict multi-user isolation, and interactive library UI with search, status filters, and progress tracking.
+* **Phase 4 (Custom Shelves & Many-to-Many Book Categorization):** Complete user-owned custom shelves, many-to-many book-to-shelf categorization, cascade safety, duplicate constraint race protection (409 Conflict), empty shelf listings via LEFT OUTER JOIN, dual-ownership shelf filtering, and responsive modular frontend (ShelfSidebar, ShelfModal, AssignShelfModal).
 * **Phase 5 (Shared Shelves & Role-Based Access Control):** Complete collaborative shelf sharing with RBAC (Owner, Editor, Viewer roles), centralized permission resolver, member book ownership isolation, cascade safety, and responsive UI with ShelfShareModal, segregated "My Shelves" / "Shared with me" sidebar, and active shelf permissions.
 * **Phase 6+ (Feature Implementations):** *Planned* (Lending, WebSockets, Dashboard Analytics, Real-time Activity).
 
@@ -339,7 +340,47 @@ FastAPI automatically serves interactive API documentation:
 * **ReDoc Alternative:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
 
 ### Currently Implemented Endpoints
-* `GET /api/health` — Service health check (returns `{"status": "ok"}`).
+* **System & Health:**
+  * `GET /api/health` — Service health check (returns `{"status": "ok"}`).
+* **Authentication (Phase 2):**
+  * `POST /api/auth/signup` — Register a new user account.
+  * `POST /api/auth/login` — Authenticate user, returns in-memory access token + HttpOnly refresh cookie.
+  * `POST /api/auth/refresh` — Rotate single-use refresh token with concurrency protection.
+  * `POST /api/auth/logout` — Revoke active refresh token.
+  * `GET /api/auth/me` — Retrieve current authenticated user profile.
+* **Personal Books & Catalog (Phase 3 & Pagination):**
+  * `GET /api/books` — Server-side paginated, searchable, status-filtered, and sorted book list. Supports `shelf_id` filtering.
+  * `POST /api/books` — Add a new book to the user's library.
+  * `GET /api/books/{id}` — Get single book details.
+  * `PATCH /api/books/{id}` — Partial book update (reading status, progress page, rating, notes).
+  * `PUT /api/books/{id}` — Full book update.
+  * `DELETE /api/books/{id}` — Delete book from library.
+* **Custom Shelves (Phase 4):**
+  * `GET /api/shelves` — List user's owned custom shelves and shared collaborator shelves with accurate book counts.
+  * `POST /api/shelves` — Create custom shelf (enforces unique name per user).
+  * `GET /api/shelves/{id}` — Get shelf detail with associated books and collaborators.
+  * `PATCH /api/shelves/{id}` — Rename shelf (owner only).
+  * `DELETE /api/shelves/{id}` — Delete custom shelf (owner only; cascade-safe, preserves books).
+  * `POST /api/shelves/{id}/books` — Add book to shelf (owner/editor; caller must own the book).
+  * `DELETE /api/shelves/{id}/books/{book_id}` — Remove book from shelf (owner/editor; preserves book).
+* **Shelf Sharing & RBAC (Phase 5):**
+  * `POST /api/shelves/{id}/shares` — Invite collaborator by email (owner only; roles: `editor`, `viewer`).
+  * `GET /api/shelves/{id}/shares` — List active collaborators on shelf.
+  * `PATCH /api/shelves/{id}/shares/{share_id}` — Update collaborator role (owner only).
+  * `DELETE /api/shelves/{id}/shares/{share_id}` — Remove collaborator (owner) or leave shelf (collaborator).
+
+---
+
+### Automated Test Verification
+Run the backend test suites from the `backend/` directory:
+```bash
+cd backend
+.\venv\Scripts\python test_shelf_sharing_phase5.py
+.\venv\Scripts\python test_shelves_phase4.py
+.\venv\Scripts\python test_books_phase3.py
+.\venv\Scripts\python test_auth_phase2.py
+.\venv\Scripts\python test_pagination.py
+```
 
 ---
 
@@ -364,7 +405,7 @@ React with Vite was chosen over Next.js for BookNest based on the assessment's a
 | **2** | Authentication (JWT, bcrypt, Refresh Token Rotation, AuthContext) | ✅ Completed |
 | **3** | Book Management & Personal Library CRUD | ✅ Completed |
 | **4** | Custom Shelves & Many-to-Many Book Categorization | ✅ Completed |
-| **5** | Shelf Sharing & Role-Based Access Control (Owner / Editor / Viewer) | ⏳ *Planned* |
+| **5** | Shelf Sharing & Role-Based Access Control (Owner / Editor / Viewer) | ✅ Completed |
 | **6** | Reading Progress Tracker & Page Updates | ⏳ *Planned* |
 | **7** | Peer-to-Peer Book Lending & Active Loan Enforcement | ⏳ *Planned* |
 | **8** | Activity Feed & Event Audit Logging | ⏳ *Planned* |
