@@ -66,3 +66,40 @@ export const addBookToShelfApi = (shelfId, bookId) => {
 export const removeBookFromShelfApi = (shelfId, bookId) => {
   return api.delete(`/shelves/${shelfId}/books/${bookId}`)
 }
+
+/**
+ * Invite a collaborator to a custom shelf.
+ * @param {string} shelfId - Shelf UUID.
+ * @param {Object} data - Payload: { email: string, role: 'editor' | 'viewer' }.
+ */
+export const shareShelfApi = (shelfId, data) => {
+  return api.post(`/shelves/${shelfId}/shares`, data)
+}
+
+/**
+ * Fetch all collaborators assigned to a shelf.
+ * @param {string} shelfId - Shelf UUID.
+ */
+export const getShelfSharesApi = (shelfId) => {
+  return api.get(`/shelves/${shelfId}/shares`)
+}
+
+/**
+ * Update a collaborator's role on a shelf.
+ * @param {string} shelfId - Shelf UUID.
+ * @param {string} shareId - ShelfShare UUID.
+ * @param {string} role - Target role: 'editor' | 'viewer'.
+ */
+export const updateShelfShareRoleApi = (shelfId, shareId, role) => {
+  return api.patch(`/shelves/${shelfId}/shares/${shareId}`, { role })
+}
+
+/**
+ * Remove a collaborator from a shelf, or leave a shared shelf.
+ * @param {string} shelfId - Shelf UUID.
+ * @param {string} shareId - ShelfShare UUID.
+ */
+export const removeShelfShareApi = (shelfId, shareId) => {
+  return api.delete(`/shelves/${shelfId}/shares/${shareId}`)
+}
+

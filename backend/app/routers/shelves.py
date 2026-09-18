@@ -7,10 +7,13 @@ from app.dependencies import get_current_user
 from app.models.user import User
 from app.schemas.shelf import (
     AddBookToShelfRequest,
+    CollaboratorResponse,
     ShelfBookResponse,
     ShelfCreate,
     ShelfDetailResponse,
     ShelfResponse,
+    ShelfShareCreate,
+    ShelfShareUpdate,
     ShelfUpdate,
 )
 from app.services import shelf_service
@@ -39,14 +42,14 @@ def create_shelf(
 @router.get(
     "",
     response_model=list[ShelfResponse],
-    summary="List user's custom shelves",
+    summary="List user's custom and shared shelves",
 )
 def list_shelves(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
     """
-    List all shelves belonging to the authenticated user with book count badges.
+    List all shelves accessible to the authenticated user (owned + shared) with role and book count badges.
     """
     return shelf_service.list_shelves(db, current_user.id)
 
@@ -54,7 +57,7 @@ def list_shelves(
 @router.get(
     "/{shelf_id}",
     response_model=ShelfDetailResponse,
-    summary="Get details of a shelf including its books",
+    summary="Get details of a shelf including its books and collaborators",
 )
 def get_shelf(
     shelf_id: UUID,
@@ -62,8 +65,8 @@ def get_shelf(
     db: Session = Depends(get_db),
 ):
     """
-    Retrieve single shelf metadata and its member books.
-    Enforces user ownership: returns 404 if shelf does not exist or belongs to another user.
+    Retrieve single shelf metadata, assigned books, and collaborators.
+    Enforces RBAC: allowed for owner, editor, and viewer. Returns 404 if inaccessible.
     """
     return shelf_service.get_shelf_detail(db, current_user.id, shelf_id)
 
@@ -81,7 +84,7 @@ def patch_shelf(
 ):
     """
     Rename an existing shelf.
-    Returns 409 Conflict if the new name collides with another shelf owned by the user.
+    Enforces RBAC: only owner can rename shelf (403 for editors/viewers).
     """
     return shelf_service.update_shelf(db, current_user.id, shelf_id, shelf_in)
 
@@ -99,6 +102,7 @@ def put_shelf(
 ):
     """
     Update shelf (PUT semantic compatibility).
+    Enforces RBAC: only owner can update shelf (403 for editors/viewers).
     """
     return shelf_service.update_shelf(db, current_user.id, shelf_id, shelf_in)
 
@@ -115,8 +119,8 @@ def delete_shelf(
 ):
     """
     Delete a shelf.
-    Association entries in `shelf_books` are cascade deleted, but the actual member books
-    remain intact in the user's library.
+    Enforces RBAC: only owner can delete shelf (403 for editors/viewers).
+    CASCADE constraints safely delete join rows while preserving all actual member books.
     """
     shelf_service.delete_shelf(db, current_user.id, shelf_id)
     return None
@@ -136,8 +140,8 @@ def add_book_to_shelf(
 ):
     """
     Assign a book to a custom shelf:
-    - Verifies shelf ownership (404 if not owned by user).
-    - Verifies book ownership (404 if not owned by user).
+    - Enforces RBAC: allowed for owner and editor (403 for viewer).
+    - Enforces book ownership: user can add only their own book (404 if not found).
     - Prevents duplicates (409 Conflict if book is already on shelf).
     """
     return shelf_service.add_book_to_shelf(db, current_user.id, shelf_id, req.book_id)
@@ -155,8 +159,95 @@ def remove_book_from_shelf(
     db: Session = Depends(get_db),
 ):
     """
-    Remove a book from a custom shelf.
-    The book itself remains in the user's personal library.
+    Remove a book association from a shelf:
+    - Enforces RBAC: allowed for owner and editor (403 for viewer).
+    - The actual book remains in the user's personal library.
     """
     shelf_service.remove_book_from_shelf(db, current_user.id, shelf_id, book_id)
+    return None
+
+
+# =============================================================================
+# Shelf Sharing & Collaborator RBAC Routes
+# =============================================================================
+
+
+@router.post(
+    "/{shelf_id}/shares",
+    response_model=CollaboratorResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Invite a collaborator to a shelf",
+)
+def share_shelf(
+    shelf_id: UUID,
+    share_in: ShelfShareCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Invite a collaborator to a shelf by registered email:
+    - Enforces RBAC: only owner can invite collaborators (403 for others).
+    - 404 if email is not found in system.
+    - 400 if owner tries to share with self.
+    - 409 if already shared with this user.
+    """
+    return shelf_service.share_shelf(db, current_user.id, shelf_id, share_in)
+
+
+@router.get(
+    "/{shelf_id}/shares",
+    response_model=list[CollaboratorResponse],
+    summary="List collaborators for a shelf",
+)
+def list_shelf_shares(
+    shelf_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    List all collaborators on a shelf.
+    Allowed for owner, editor, and viewer. Returns 404 if user has no access to shelf.
+    """
+    return shelf_service.list_shelf_shares(db, current_user.id, shelf_id)
+
+
+@router.patch(
+    "/{shelf_id}/shares/{share_id}",
+    response_model=CollaboratorResponse,
+    summary="Change a collaborator's role",
+)
+def update_shelf_share(
+    shelf_id: UUID,
+    share_id: UUID,
+    share_in: ShelfShareUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Update a collaborator's role ('editor' <-> 'viewer').
+    Enforces RBAC: only owner can modify roles (403 for others).
+    """
+    return shelf_service.update_shelf_share(
+        db, current_user.id, shelf_id, share_id, share_in.role
+    )
+
+
+@router.delete(
+    "/{shelf_id}/shares/{share_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Remove a collaborator or leave a shared shelf",
+)
+def delete_shelf_share(
+    shelf_id: UUID,
+    share_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Remove a collaborator from a shelf:
+    - Owner can remove any collaborator.
+    - Collaborator can remove ONLY their own share (leave shelf).
+    - Collaborator cannot remove other collaborators (403).
+    """
+    shelf_service.delete_shelf_share(db, current_user.id, shelf_id, share_id)
     return None

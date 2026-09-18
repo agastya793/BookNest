@@ -13,8 +13,8 @@ BookNest is an application built for managing books, tracking reading milestones
 * **Phase 1 (Project Scaffold & Database Layer):** Complete backend application skeleton, SQLAlchemy 2.0 ORM models, Alembic migrations executed against PostgreSQL, Vite + React frontend configuration with Axios client and local proxy, and design tokens.
 * **Phase 2 (Authentication Layer):** Complete JWT access tokens in React memory, HttpOnly refresh cookies, SHA-256 token hashing, SELECT FOR UPDATE rotation concurrency safety, password policy enforcement, Axios 401 interceptor replay queue, and React Router protected routing.
 * **Phase 3 (Book Management & Personal Library CRUD):** Complete personal book cataloging, Pydantic v2 cross-field validation, computed progress_percentage, status lifecycle management, strict multi-user isolation, and interactive library UI with search, status filters, and progress tracking.
-* **Phase 4 (Custom Shelves & Many-to-Many Book Categorization):** Complete user-owned custom shelves, many-to-many book-to-shelf categorization, cascade safety, duplicate constraint race protection (409 Conflict), empty shelf listings via LEFT OUTER JOIN, dual-ownership shelf filtering, and responsive modular frontend (ShelfSidebar, ShelfModal, AssignShelfModal).
-* **Phase 5+ (Feature Implementations):** *Planned* (Shelf Sharing, Lending, WebSockets, Dashboard, Tests).
+* **Phase 5 (Shared Shelves & Role-Based Access Control):** Complete collaborative shelf sharing with RBAC (Owner, Editor, Viewer roles), centralized permission resolver, member book ownership isolation, cascade safety, and responsive UI with ShelfShareModal, segregated "My Shelves" / "Shared with me" sidebar, and active shelf permissions.
+* **Phase 6+ (Feature Implementations):** *Planned* (Lending, WebSockets, Dashboard Analytics, Real-time Activity).
 
 ---
 

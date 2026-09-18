@@ -6,6 +6,7 @@ import BookModal from '../components/BookModal'
 import ShelfSidebar from '../components/ShelfSidebar'
 import ShelfModal from '../components/ShelfModal'
 import AssignShelfModal from '../components/AssignShelfModal'
+import ShelfShareModal from '../components/ShelfShareModal'
 import {
   getBooksApi,
   createBookApi,
@@ -58,6 +59,7 @@ export default function Dashboard() {
     shelf: null,
   })
   const [assignModalBook, setAssignModalBook] = useState(null)
+  const [shareModalShelf, setShareModalShelf] = useState(null)
 
   // Collapsible Architecture Diagnostics
   const [showDiagnostics, setShowDiagnostics] = useState(false)
@@ -244,6 +246,11 @@ export default function Dashboard() {
   // Assign Shelves Modal Handlers
   const handleOpenAssignModal = (book) => {
     setAssignModalBook(book)
+  }
+
+  // Shelf Sharing Modal Handlers
+  const handleOpenShareShelf = (shelf) => {
+    setShareModalShelf(shelf)
   }
 
   const handleAssignedChange = async () => {
@@ -490,6 +497,7 @@ export default function Dashboard() {
             onOpenCreateShelf={handleOpenCreateShelf}
             onOpenEditShelf={handleOpenEditShelf}
             onDeleteShelf={handleDeleteShelf}
+            onOpenShareShelf={handleOpenShareShelf}
             loading={shelvesLoading}
           />
 
@@ -509,30 +517,53 @@ export default function Dashboard() {
                 }}
               >
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '1.25rem' }}>📁</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '1.25rem' }}>{activeShelf.role && activeShelf.role !== 'owner' ? '🤝' : '📁'}</span>
                     <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700 }}>
                       Shelf: {activeShelf.name}
                     </h3>
                     <span className="badge badge-accent">
                       {total} {total === 1 ? 'Book' : 'Books'}
                     </span>
+                    <span
+                      className={`badge ${activeShelf.role === 'editor' ? 'badge-accent' : activeShelf.role === 'viewer' ? 'badge-info' : 'badge-accent'}`}
+                      style={{ textTransform: 'capitalize' }}
+                    >
+                      {activeShelf.role || 'Owner'}
+                    </span>
+                    {activeShelf.role && activeShelf.role !== 'owner' && (
+                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
+                        Shared by <strong>{activeShelf.owner_name || activeShelf.owner_email || 'Owner'}</strong>
+                      </span>
+                    )}
                   </div>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '2px' }}>
-                    Filtered view. Removing a book from this shelf or deleting this shelf preserves your library book.
+                  <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '4px' }}>
+                    {activeShelf.role === 'viewer'
+                      ? 'Read-only view. You can browse books on this shelf.'
+                      : 'Filtered view. Removing a book from this shelf or deleting this shelf preserves library books.'}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={() => {
-                    setSelectedShelfId(null)
-                    setPage(1)
-                  }}
-                  style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
-                >
-                  ✕ View All Books
-                </button>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => handleOpenShareShelf(activeShelf)}
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
+                  >
+                    {activeShelf.role === 'owner' || !activeShelf.role ? '👥 Manage Collaborators' : '👥 Collaborators / Leave'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => {
+                      setSelectedShelfId(null)
+                      setPage(1)
+                    }}
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
+                  >
+                    ✕ View All Books
+                  </button>
+                </div>
               </div>
             )}
 
@@ -564,9 +595,11 @@ export default function Dashboard() {
                       : `Organize, track reading milestones, and manage your collection`}
                   </p>
                 </div>
-                <button className="btn-primary" onClick={handleOpenAddBookModal}>
-                  + Add Book
-                </button>
+                {activeShelf?.role !== 'viewer' && (
+                  <button className="btn-primary" onClick={handleOpenAddBookModal}>
+                    + Add Book
+                  </button>
+                )}
               </div>
 
               {/* Search, Filter Tabs & Sort Controls */}
@@ -687,9 +720,11 @@ export default function Dashboard() {
                     >
                       View All Books
                     </button>
-                    <button className="btn-primary" onClick={handleOpenAddBookModal}>
-                      + Add Book to Shelf
-                    </button>
+                    {activeShelf.role !== 'viewer' && (
+                      <button className="btn-primary" onClick={handleOpenAddBookModal}>
+                        + Add Book to Shelf
+                      </button>
+                    )}
                   </div>
                 ) : statusFilter || searchTerm ? (
                   <button
@@ -717,19 +752,22 @@ export default function Dashboard() {
                     gap: 'var(--space-lg)',
                   }}
                 >
-                  {books.map((book) => (
-                    <BookCard
-                      key={book.id}
-                      book={book}
-                      onEdit={handleOpenEditBookModal}
-                      onDelete={handleDeleteBook}
-                      onQuickProgress={handleQuickProgress}
-                      onManageShelves={handleOpenAssignModal}
-                      currentShelf={activeShelf}
-                      onRemoveFromShelf={handleRemoveFromShelf}
-                      shelvesMap={shelvesMap}
-                    />
-                  ))}
+                  {books.map((book) => {
+                    const isBookOwner = !book.user_id || book.user_id === user?.id
+                    return (
+                      <BookCard
+                        key={book.id}
+                        book={book}
+                        onEdit={isBookOwner ? handleOpenEditBookModal : null}
+                        onDelete={isBookOwner ? handleDeleteBook : null}
+                        onQuickProgress={isBookOwner ? handleQuickProgress : null}
+                        onManageShelves={isBookOwner ? handleOpenAssignModal : null}
+                        currentShelf={activeShelf}
+                        onRemoveFromShelf={activeShelf?.role !== 'viewer' ? handleRemoveFromShelf : null}
+                        shelvesMap={shelvesMap}
+                      />
+                    )
+                  })}
                 </div>
 
                 {/* Server-Side Pagination Controls */}
@@ -947,6 +985,21 @@ export default function Dashboard() {
         book={assignModalBook}
         shelves={shelves}
         onAssignedChange={handleAssignedChange}
+      />
+
+      {/* Shelf Share / RBAC Modal */}
+      <ShelfShareModal
+        isOpen={!!shareModalShelf}
+        onClose={() => setShareModalShelf(null)}
+        shelf={shareModalShelf}
+        currentUserId={user?.id}
+        onShareUpdated={async (leftShelf) => {
+          if (leftShelf && selectedShelfId === shareModalShelf?.id) {
+            setSelectedShelfId(null)
+            setPage(1)
+          }
+          await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
+        }}
       />
     </div>
   )

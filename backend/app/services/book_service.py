@@ -80,23 +80,17 @@ def list_books(
     optional shelf filtering, case-insensitive search against title/author,
     standardized sorting, and server-side pagination executed in PostgreSQL.
     """
-    query = db.query(Book).filter(Book.user_id == user_id)
-
-    # Optional shelf filter: enforce shelf ownership and association
+    # If shelf_id is specified, verify access via RBAC and filter books on that shelf
     if shelf_id:
-        shelf = (
-            db.query(Shelf)
-            .filter(Shelf.id == shelf_id, Shelf.user_id == user_id)
-            .first()
+        from app.services import shelf_service
+        shelf, role = shelf_service.get_shelf_with_role(db, user_id, shelf_id)
+        query = (
+            db.query(Book)
+            .join(ShelfBook, ShelfBook.book_id == Book.id)
+            .filter(ShelfBook.shelf_id == shelf_id)
         )
-        if not shelf:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Shelf not found",
-            )
-        query = query.join(ShelfBook, ShelfBook.book_id == Book.id).filter(
-            ShelfBook.shelf_id == shelf_id
-        )
+    else:
+        query = db.query(Book).filter(Book.user_id == user_id)
 
     # Optional status filter
     if status_filter:

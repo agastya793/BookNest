@@ -21,6 +21,9 @@ from app.schemas.shelf import (
     ShelfDetailResponse,
     AddBookToShelfRequest,
     ShelfBookResponse,
+    ShelfShareCreate,
+    ShelfShareUpdate,
+    CollaboratorResponse,
 )
 
 __all__ = [
@@ -42,4 +45,7 @@ __all__ = [
     "ShelfDetailResponse",
     "AddBookToShelfRequest",
     "ShelfBookResponse",
+    "ShelfShareCreate",
+    "ShelfShareUpdate",
+    "CollaboratorResponse",
 ]

@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Literal, Optional
 from uuid import UUID
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 from app.schemas.book import BookResponse
 
 
@@ -42,17 +43,47 @@ class ShelfBookResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ShelfShareCreate(BaseModel):
+    """Schema for inviting a collaborator to a shelf."""
+    email: EmailStr
+    role: Literal["editor", "viewer"]
+
+
+class ShelfShareUpdate(BaseModel):
+    """Schema for modifying a collaborator's role."""
+    role: Literal["editor", "viewer"]
+
+
+class CollaboratorResponse(BaseModel):
+    """Schema representing a collaborator on a shared shelf."""
+    id: UUID
+    shelf_id: UUID
+    user_id: UUID
+    user_name: str
+    user_email: str
+    role: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ShelfResponse(BaseModel):
-    """Public representation of a shelf."""
+    """Public representation of a shelf with role and owner metadata."""
     id: UUID
     user_id: UUID
     name: str
     created_at: datetime
     book_count: int = 0
+    role: str = "owner"
+    owner_name: Optional[str] = None
+    owner_email: Optional[str] = None
+    is_shared: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
 
 class ShelfDetailResponse(ShelfResponse):
-    """Detailed shelf representation including member books."""
-    books: list[BookResponse] = []
+    """Detailed shelf representation including member books and collaborators."""
+    books: list[BookResponse] = Field(default_factory=list)
+    collaborators: list[CollaboratorResponse] = Field(default_factory=list)
+

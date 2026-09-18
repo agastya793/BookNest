@@ -7,14 +7,51 @@ from sqlalchemy.orm import Session
 from app.models.book import Book
 from app.models.shelf import Shelf
 from app.models.shelf_book import ShelfBook
+from app.models.shelf_share import ShelfShare
+from app.models.user import User
 from app.schemas.book import BookResponse
 from app.schemas.shelf import (
+    CollaboratorResponse,
+    ShelfBookResponse,
     ShelfCreate,
     ShelfDetailResponse,
     ShelfResponse,
+    ShelfShareCreate,
     ShelfUpdate,
-    ShelfBookResponse,
 )
+
+
+def get_shelf_with_role(
+    db: Session, user_id: UUID, shelf_id: UUID
+) -> tuple[Shelf, str]:
+    """
+    Centralized RBAC permission resolver:
+    - If user owns the shelf -> role = "owner"
+    - Else if user has an active ShelfShare -> role = "editor" | "viewer"
+    - Else -> 404 Not Found (Never leak existence of private shelf to unauthorized users)
+    """
+    shelf = db.query(Shelf).filter(Shelf.id == shelf_id).first()
+    if not shelf:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Shelf not found",
+        )
+
+    if shelf.user_id == user_id:
+        return shelf, "owner"
+
+    share = (
+        db.query(ShelfShare)
+        .filter(ShelfShare.shelf_id == shelf_id, ShelfShare.user_id == user_id)
+        .first()
+    )
+    if share:
+        return shelf, share.role
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Shelf not found",
+    )
 
 
 def create_shelf(db: Session, user_id: UUID, shelf_in: ShelfCreate) -> ShelfResponse:
@@ -52,15 +89,20 @@ def create_shelf(db: Session, user_id: UUID, shelf_in: ShelfCreate) -> ShelfResp
         name=shelf.name,
         created_at=shelf.created_at,
         book_count=0,
+        role="owner",
+        is_shared=False,
     )
 
 
 def list_shelves(db: Session, user_id: UUID) -> list[ShelfResponse]:
     """
-    List all shelves belonging to the authenticated user along with
-    the count of books on each shelf.
+    List all shelves accessible by the authenticated user:
+    1. Shelves owned by the user (role = "owner").
+    2. Shelves shared with the user (role = "editor" or "viewer").
+    Preserves predictable ordering (owned first, then shared, ordered by created_at).
     """
-    results = (
+    # 1. Query owned shelves with book counts
+    owned_results = (
         db.query(Shelf, func.count(ShelfBook.id).label("book_count"))
         .outerjoin(ShelfBook, ShelfBook.shelf_id == Shelf.id)
         .filter(Shelf.user_id == user_id)
@@ -69,76 +111,149 @@ def list_shelves(db: Session, user_id: UUID) -> list[ShelfResponse]:
         .all()
     )
 
-    return [
+    # Determine which owned shelves currently have collaborators
+    shared_owned_shelf_ids = {
+        row[0]
+        for row in (
+            db.query(ShelfShare.shelf_id)
+            .join(Shelf, Shelf.id == ShelfShare.shelf_id)
+            .filter(Shelf.user_id == user_id)
+            .distinct()
+            .all()
+        )
+    }
+
+    owned_shelves = [
         ShelfResponse(
             id=shelf.id,
             user_id=shelf.user_id,
             name=shelf.name,
             created_at=shelf.created_at,
             book_count=count,
+            role="owner",
+            is_shared=(shelf.id in shared_owned_shelf_ids),
         )
-        for shelf, count in results
+        for shelf, count in owned_results
     ]
 
-
-def get_shelf_or_404(db: Session, user_id: UUID, shelf_id: UUID) -> Shelf:
-    """
-    Helper to fetch a shelf verifying user ownership.
-    Raises 404 Not Found if shelf does not exist or belongs to another user.
-    """
-    shelf = (
-        db.query(Shelf)
-        .filter(Shelf.id == shelf_id, Shelf.user_id == user_id)
-        .first()
-    )
-    if not shelf:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Shelf not found",
+    # 2. Query shelves shared with the user
+    shared_results = (
+        db.query(
+            Shelf,
+            ShelfShare.role,
+            User.name.label("owner_name"),
+            User.email.label("owner_email"),
+            func.count(ShelfBook.id).label("book_count"),
         )
-    return shelf
+        .join(ShelfShare, ShelfShare.shelf_id == Shelf.id)
+        .join(User, User.id == Shelf.user_id)
+        .outerjoin(ShelfBook, ShelfBook.shelf_id == Shelf.id)
+        .filter(ShelfShare.user_id == user_id)
+        .group_by(Shelf.id, ShelfShare.role, User.name, User.email)
+        .order_by(Shelf.created_at.asc())
+        .all()
+    )
+
+    shared_shelves = [
+        ShelfResponse(
+            id=shelf.id,
+            user_id=shelf.user_id,
+            name=shelf.name,
+            created_at=shelf.created_at,
+            book_count=count,
+            role=role,
+            owner_name=owner_name,
+            owner_email=owner_email,
+            is_shared=True,
+        )
+        for shelf, role, owner_name, owner_email, count in shared_results
+    ]
+
+    return owned_shelves + shared_shelves
 
 
 def get_shelf(db: Session, user_id: UUID, shelf_id: UUID) -> ShelfResponse:
     """
-    Retrieve single shelf metadata and book count.
+    Retrieve single shelf metadata, active role, and book count.
     """
-    shelf = get_shelf_or_404(db, user_id, shelf_id)
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
     book_count = (
         db.query(func.count(ShelfBook.id))
         .filter(ShelfBook.shelf_id == shelf.id)
         .scalar()
         or 0
     )
+    owner_user = db.query(User).filter(User.id == shelf.user_id).first()
+    share_count = (
+        db.query(func.count(ShelfShare.id))
+        .filter(ShelfShare.shelf_id == shelf.id)
+        .scalar()
+        or 0
+    )
+
     return ShelfResponse(
         id=shelf.id,
         user_id=shelf.user_id,
         name=shelf.name,
         created_at=shelf.created_at,
         book_count=book_count,
+        role=role,
+        owner_name=owner_user.name if owner_user else None,
+        owner_email=owner_user.email if owner_user else None,
+        is_shared=bool(share_count > 0 or role != "owner"),
     )
 
 
 def get_shelf_detail(db: Session, user_id: UUID, shelf_id: UUID) -> ShelfDetailResponse:
     """
-    Retrieve shelf details along with all books assigned to it.
+    Retrieve shelf details along with all assigned books and collaborators.
+    Allowed for owner, editor, and viewer.
     """
-    shelf = get_shelf_or_404(db, user_id, shelf_id)
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
+
     books = (
         db.query(Book)
         .join(ShelfBook, ShelfBook.book_id == Book.id)
-        .filter(ShelfBook.shelf_id == shelf_id, Book.user_id == user_id)
+        .filter(ShelfBook.shelf_id == shelf_id)
         .order_by(ShelfBook.added_at.desc())
         .all()
     )
     book_responses = [BookResponse.model_validate(b) for b in books]
+
+    collaborators_data = (
+        db.query(ShelfShare, User.name, User.email)
+        .join(User, User.id == ShelfShare.user_id)
+        .filter(ShelfShare.shelf_id == shelf_id)
+        .order_by(ShelfShare.created_at.asc())
+        .all()
+    )
+    collaborators = [
+        CollaboratorResponse(
+            id=share.id,
+            shelf_id=share.shelf_id,
+            user_id=share.user_id,
+            user_name=name,
+            user_email=email,
+            role=share.role,
+            created_at=share.created_at,
+        )
+        for share, name, email in collaborators_data
+    ]
+
+    owner_user = db.query(User).filter(User.id == shelf.user_id).first()
+
     return ShelfDetailResponse(
         id=shelf.id,
         user_id=shelf.user_id,
         name=shelf.name,
         created_at=shelf.created_at,
         book_count=len(book_responses),
+        role=role,
+        owner_name=owner_user.name if owner_user else None,
+        owner_email=owner_user.email if owner_user else None,
+        is_shared=bool(len(collaborators) > 0 or role != "owner"),
         books=book_responses,
+        collaborators=collaborators,
     )
 
 
@@ -146,9 +261,15 @@ def update_shelf(
     db: Session, user_id: UUID, shelf_id: UUID, shelf_in: ShelfUpdate
 ) -> ShelfResponse:
     """
-    Update/rename a shelf. Enforces name uniqueness among the user's shelves.
+    Update/rename a shelf.
+    Only the shelf owner is permitted to rename the shelf (403 for editors/viewers).
     """
-    shelf = get_shelf_or_404(db, user_id, shelf_id)
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only shelf owner can rename shelf",
+        )
 
     if shelf.name != shelf_in.name:
         existing = (
@@ -188,16 +309,25 @@ def update_shelf(
         name=shelf.name,
         created_at=shelf.created_at,
         book_count=book_count,
+        role="owner",
+        is_shared=False,
     )
 
 
 def delete_shelf(db: Session, user_id: UUID, shelf_id: UUID) -> None:
     """
     Delete a shelf from the user's collection.
-    Foreign key CASCADE automatically removes association rows in `shelf_books`,
-    while preserving the actual Book entities in the user's library.
+    Only the shelf owner is permitted to delete the shelf (403 for editors/viewers).
+    CASCADE constraints safely delete join rows in `shelf_books` and `shelf_shares`,
+    preserving all member Book records in their owners' libraries.
     """
-    shelf = get_shelf_or_404(db, user_id, shelf_id)
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only shelf owner can delete shelf",
+        )
+
     db.delete(shelf)
     db.commit()
 
@@ -206,16 +336,19 @@ def add_book_to_shelf(
     db: Session, user_id: UUID, shelf_id: UUID, book_id: UUID
 ) -> ShelfBookResponse:
     """
-    Add a book to a custom shelf.
-    Validates:
-    - Shelf exists and belongs to current user.
-    - Book exists and belongs to current user.
-    - Book is not already on this shelf (enforces 409 Conflict).
+    Add a book to a shelf:
+    - Verifies user has 'owner' or 'editor' access (403 for viewer).
+    - Verifies the book belongs to the calling user (cannot add someone else's book).
+    - Prevents duplicate book assignment on shelf (409 Conflict).
     """
-    # Verify shelf ownership
-    get_shelf_or_404(db, user_id, shelf_id)
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
+    if role not in ("owner", "editor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewers cannot add books to a shared shelf",
+        )
 
-    # Verify book ownership
+    # Book ownership rule: User may only add their OWN book to the shelf
     book = (
         db.query(Book)
         .filter(Book.id == book_id, Book.user_id == user_id)
@@ -227,7 +360,6 @@ def add_book_to_shelf(
             detail="Book not found in your library",
         )
 
-    # Check for duplicate association
     existing_assoc = (
         db.query(ShelfBook)
         .filter(ShelfBook.shelf_id == shelf_id, ShelfBook.book_id == book_id)
@@ -258,11 +390,16 @@ def remove_book_from_shelf(
     db: Session, user_id: UUID, shelf_id: UUID, book_id: UUID
 ) -> None:
     """
-    Remove a book association from a shelf.
-    Validates shelf ownership and existence of association.
-    Preserves the book entity in the user's library.
+    Remove a book association from a shelf:
+    - Verifies user has 'owner' or 'editor' access (403 for viewer).
+    - Removes ONLY the shelf association; preserves the Book entity.
     """
-    get_shelf_or_404(db, user_id, shelf_id)
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
+    if role not in ("owner", "editor"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Viewers cannot remove books from a shared shelf",
+        )
 
     assoc = (
         db.query(ShelfBook)
@@ -276,4 +413,199 @@ def remove_book_from_shelf(
         )
 
     db.delete(assoc)
+    db.commit()
+
+
+# =============================================================================
+# Shelf Sharing & Collaborator RBAC Operations
+# =============================================================================
+
+
+def share_shelf(
+    db: Session, owner_id: UUID, shelf_id: UUID, share_in: ShelfShareCreate
+) -> CollaboratorResponse:
+    """
+    Invite a collaborator to a custom shelf:
+    - Only shelf owner can invite collaborators (403 for others).
+    - Invitee looked up by registered email (404 if not found).
+    - Cannot invite oneself (400 Bad Request).
+    - Cannot duplicate an existing share (409 Conflict).
+    - Validates role ('editor' or 'viewer').
+    """
+    shelf, role = get_shelf_with_role(db, owner_id, shelf_id)
+    if role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only shelf owner can invite collaborators",
+        )
+
+    email_normalized = share_in.email.lower().strip()
+    invitee = db.query(User).filter(func.lower(User.email) == email_normalized).first()
+    if not invitee:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email '{share_in.email}' not found",
+        )
+
+    if invitee.id == owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot share shelf with yourself",
+        )
+
+    if share_in.role not in ("editor", "viewer"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Collaborator role must be 'editor' or 'viewer'",
+        )
+
+    existing_share = (
+        db.query(ShelfShare)
+        .filter(ShelfShare.shelf_id == shelf_id, ShelfShare.user_id == invitee.id)
+        .first()
+    )
+    if existing_share:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Shelf is already shared with this user",
+        )
+
+    shelf_share = ShelfShare(
+        shelf_id=shelf_id,
+        user_id=invitee.id,
+        role=share_in.role,
+    )
+    db.add(shelf_share)
+    try:
+        db.commit()
+        db.refresh(shelf_share)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Shelf is already shared with this user",
+        )
+
+    return CollaboratorResponse(
+        id=shelf_share.id,
+        shelf_id=shelf_share.shelf_id,
+        user_id=shelf_share.user_id,
+        user_name=invitee.name,
+        user_email=invitee.email,
+        role=shelf_share.role,
+        created_at=shelf_share.created_at,
+    )
+
+
+def list_shelf_shares(
+    db: Session, user_id: UUID, shelf_id: UUID
+) -> list[CollaboratorResponse]:
+    """
+    List all collaborators on a shelf.
+    Allowed for shelf owner, editors, and viewers.
+    """
+    shelf, role = get_shelf_with_role(db, user_id, shelf_id)
+    shares = (
+        db.query(ShelfShare, User.name, User.email)
+        .join(User, User.id == ShelfShare.user_id)
+        .filter(ShelfShare.shelf_id == shelf_id)
+        .order_by(ShelfShare.created_at.asc())
+        .all()
+    )
+    return [
+        CollaboratorResponse(
+            id=share.id,
+            shelf_id=share.shelf_id,
+            user_id=share.user_id,
+            user_name=name,
+            user_email=email,
+            role=share.role,
+            created_at=share.created_at,
+        )
+        for share, name, email in shares
+    ]
+
+
+def update_shelf_share(
+    db: Session, owner_id: UUID, shelf_id: UUID, share_id: UUID, role: str
+) -> CollaboratorResponse:
+    """
+    Change collaborator role (editor <-> viewer):
+    - Only shelf owner can update collaborator roles (403 for others).
+    - Role must be 'editor' or 'viewer'.
+    """
+    shelf, current_role = get_shelf_with_role(db, owner_id, shelf_id)
+    if current_role != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only shelf owner can change collaborator roles",
+        )
+
+    if role not in ("editor", "viewer"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Collaborator role must be 'editor' or 'viewer'",
+        )
+
+    share = (
+        db.query(ShelfShare)
+        .filter(ShelfShare.id == share_id, ShelfShare.shelf_id == shelf_id)
+        .first()
+    )
+    if not share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collaborator share not found",
+        )
+
+    share.role = role
+    db.commit()
+    db.refresh(share)
+
+    user = db.query(User).filter(User.id == share.user_id).first()
+    return CollaboratorResponse(
+        id=share.id,
+        shelf_id=share.shelf_id,
+        user_id=share.user_id,
+        user_name=user.name if user else "",
+        user_email=user.email if user else "",
+        role=share.role,
+        created_at=share.created_at,
+    )
+
+
+def delete_shelf_share(
+    db: Session, user_id: UUID, shelf_id: UUID, share_id: UUID
+) -> None:
+    """
+    Remove a collaborator from a shelf or leave a shared shelf:
+    - Shelf owner can remove any collaborator.
+    - Collaborator (editor/viewer) can remove ONLY their own share.
+    - Collaborators cannot remove other collaborators (403).
+    - Deleting share preserves the shelf and all book records.
+    """
+    shelf, current_role = get_shelf_with_role(db, user_id, shelf_id)
+    share = (
+        db.query(ShelfShare)
+        .filter(ShelfShare.id == share_id, ShelfShare.shelf_id == shelf_id)
+        .first()
+    )
+    if not share:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Collaborator share not found",
+        )
+
+    # Permission check: owner can remove any; collaborator can remove only self
+    if current_role == "owner":
+        pass
+    elif share.user_id == user_id:
+        pass
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Collaborators cannot remove other collaborators",
+        )
+
+    db.delete(share)
     db.commit()

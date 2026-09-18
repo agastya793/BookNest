@@ -224,7 +224,7 @@ export default function BookCard({
         }}
       >
         {/* Quick Progress Buttons */}
-        {book.status !== 'finished' && (
+        {onQuickProgress && book.status !== 'finished' && (
           <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
             <button
               type="button"
@@ -248,7 +248,7 @@ export default function BookCard({
         )}
 
         {/* Contextual "Remove from Shelf" Button when viewing an active shelf */}
-        {currentShelf && onRemoveFromShelf && (
+        {currentShelf && onRemoveFromShelf && currentShelf.role !== 'viewer' && (
           <button
             type="button"
             className="btn-secondary"
@@ -261,7 +261,7 @@ export default function BookCard({
               marginBottom: 'var(--space-xs)',
               justifyContent: 'center',
             }}
-            title={`Remove "${book.title}" from "${currentShelf.name}" (keeps book in your library)`}
+            title={`Remove "${book.title}" from "${currentShelf.name}" (keeps book in library)`}
           >
             ✕ Remove from "{currentShelf.name}"
           </button>
@@ -270,40 +270,46 @@ export default function BookCard({
         {/* Manage Shelves, Edit, and Delete Actions */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-xs)' }}>
           {/* Manage Shelves Button */}
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => onManageShelves && onManageShelves(book)}
-            style={{
-              padding: '4px 8px',
-              fontSize: 'var(--font-size-xs)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '4px',
-            }}
-            title="Assign book to custom shelves"
-          >
-            <span>📁</span> Shelves
-          </button>
-
-          {/* Edit and Delete Buttons */}
-          <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+          {onManageShelves ? (
             <button
               type="button"
               className="btn-secondary"
-              onClick={() => onEdit(book)}
-              style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+              onClick={() => onManageShelves(book)}
+              style={{
+                padding: '4px 8px',
+                fontSize: 'var(--font-size-xs)',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+              }}
+              title="Assign book to custom shelves"
             >
-              Edit
+              <span>📁</span> Shelves
             </button>
-            <button
-              type="button"
-              className="btn-danger"
-              onClick={() => onDelete(book.id, book.title)}
-              style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
-            >
-              Delete
-            </button>
+          ) : <div />}
+
+          {/* Edit and Delete Buttons */}
+          <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+            {onEdit && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => onEdit(book)}
+                style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+              >
+                Edit
+              </button>
+            )}
+            {onDelete && (
+              <button
+                type="button"
+                className="btn-danger"
+                onClick={() => onDelete(book.id, book.title)}
+                style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+              >
+                Delete
+              </button>
+            )}
           </div>
         </div>
       </div>
