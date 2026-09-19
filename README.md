@@ -15,7 +15,8 @@ BookNest is an application built for managing books, tracking reading milestones
 * **Phase 3 (Book Management & Personal Library CRUD):** Complete personal book cataloging, Pydantic v2 cross-field validation, computed progress_percentage, status lifecycle management, strict multi-user isolation, and interactive library UI with search, status filters, and progress tracking.
 * **Phase 4 (Custom Shelves & Many-to-Many Book Categorization):** Complete user-owned custom shelves, many-to-many book-to-shelf categorization, cascade safety, duplicate constraint race protection (409 Conflict), empty shelf listings via LEFT OUTER JOIN, dual-ownership shelf filtering, and responsive modular frontend (ShelfSidebar, ShelfModal, AssignShelfModal).
 * **Phase 5 (Shared Shelves & Role-Based Access Control):** Complete collaborative shelf sharing with RBAC (Owner, Editor, Viewer roles), centralized permission resolver, member book ownership isolation, cascade safety, and responsive UI with ShelfShareModal, segregated "My Shelves" / "Shared with me" sidebar, and active shelf permissions.
-* **Phase 6+ (Feature Implementations):** *Planned* (Lending, WebSockets, Dashboard Analytics, Real-time Activity).
+* **Phase 6 (Reading Progress Tracker, Page Updates & Statistics):** Complete reading progress tracker with boundary validation, automated status lifecycle transitions (want_to_read -> reading -> finished), milestone tracking (25%, 50%, 75%, 100%), single-occurrence milestone celebration toasts, aggregated reading statistics endpoint (GET /api/books/stats/summary), single ActivityLog audit records, and interactive frontend UI (ProgressModal with scrubber, quick steppers, notes, and ReadingStatsBanner).
+* **Phase 7+ (Feature Implementations):** *Planned* (Lending, WebSockets, Real-time Activity, Seed Script, etc.).
 
 ---
 
@@ -368,6 +369,9 @@ FastAPI automatically serves interactive API documentation:
   * `GET /api/shelves/{id}/shares` — List active collaborators on shelf.
   * `PATCH /api/shelves/{id}/shares/{share_id}` — Update collaborator role (owner only).
   * `DELETE /api/shelves/{id}/shares/{share_id}` — Remove collaborator (owner) or leave shelf (collaborator).
+* **Reading Progress Tracker & Statistics (Phase 6):**
+  * `POST /api/books/{id}/progress` — Update reading progress with automated status transitions (`want_to_read` -> `reading` -> `finished`), milestone detection, reflection notes, rating, and activity logging.
+  * `GET /api/books/stats/summary` — Retrieve aggregated user reading statistics (total books, status counts, total pages read, completion rate).
 
 ---
 
@@ -375,6 +379,7 @@ FastAPI automatically serves interactive API documentation:
 Run the backend test suites from the `backend/` directory:
 ```bash
 cd backend
+.\venv\Scripts\python test_progress_phase6.py
 .\venv\Scripts\python test_shelf_sharing_phase5.py
 .\venv\Scripts\python test_shelves_phase4.py
 .\venv\Scripts\python test_books_phase3.py
@@ -406,7 +411,7 @@ React with Vite was chosen over Next.js for BookNest based on the assessment's a
 | **3** | Book Management & Personal Library CRUD | ✅ Completed |
 | **4** | Custom Shelves & Many-to-Many Book Categorization | ✅ Completed |
 | **5** | Shelf Sharing & Role-Based Access Control (Owner / Editor / Viewer) | ✅ Completed |
-| **6** | Reading Progress Tracker & Page Updates | ⏳ *Planned* |
+| **6** | Reading Progress Tracker & Page Updates | ✅ Completed |
 | **7** | Peer-to-Peer Book Lending & Active Loan Enforcement | ⏳ *Planned* |
 | **8** | Activity Feed & Event Audit Logging | ⏳ *Planned* |
 | **9** | Real-time WebSocket Updates (python-socketio) | ⏳ *Planned* |
