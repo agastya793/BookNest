@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import get_current_user
 from app.models.user import User
-from app.schemas.book import BookCreate, BookResponse, BookUpdate, PaginatedBooksResponse
+from app.schemas.book import (
+    BookCreate,
+    BookResponse,
+    BookUpdate,
+    PaginatedBooksResponse,
+    BookProgressUpdate,
+    ReadingStatsResponse,
+    ProgressUpdateResponse,
+)
 from app.services import book_service
 
 router = APIRouter(prefix="/api/books", tags=["Books"])
@@ -86,6 +94,49 @@ def list_books(
         search=search,
         sort_by=sort_by,
         sort_dir=sort_dir,
+    )
+
+
+@router.get(
+    "/stats/summary",
+    response_model=ReadingStatsResponse,
+    summary="Get aggregated reading statistics for authenticated user",
+)
+def get_reading_stats(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Retrieve reading statistics for the user's catalog:
+    - total_books, books_want_to_read, books_reading, books_finished
+    - total_pages_read: sum of current pages read across all books
+    - completion_rate: finished_books / total_books * 100 (0.0 if empty)
+    """
+    return book_service.get_reading_stats(db, current_user.id)
+
+
+@router.post(
+    "/{book_id}/progress",
+    response_model=ProgressUpdateResponse,
+    summary="Update reading progress with milestone tracking and auto-transitions",
+)
+def update_book_progress(
+    book_id: UUID,
+    progress_in: BookProgressUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Dedicated endpoint to record reading progress:
+    - Automatically advances status:
+      * want_to_read -> reading when current_page > 0
+      * reading -> finished when current_page reaches total_pages
+      * finished -> reading when current_page drops below total_pages
+    - Computes milestones reached during the current update (quarter, half, three_quarters, completed)
+    - Records audit log in activity_logs (at most one record per update)
+    """
+    return book_service.update_book_progress(
+        db, current_user.id, book_id, progress_in
     )
 
 

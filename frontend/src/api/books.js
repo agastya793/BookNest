@@ -53,3 +53,19 @@ export const updateBookApi = (bookId, bookData) => {
 export const deleteBookApi = (bookId) => {
   return api.delete(`/books/${bookId}`)
 }
+
+/**
+ * Dedicated reading progress update with milestone tracking.
+ * @param {string} bookId - Book UUID.
+ * @param {Object} progressData - { current_page, notes, rating }
+ */
+export const updateBookProgressApi = (bookId, progressData) => {
+  return api.post(`/books/${bookId}/progress`, progressData)
+}
+
+/**
+ * Get aggregated reading statistics for authenticated user.
+ */
+export const getReadingStatsApi = () => {
+  return api.get('/books/stats/summary')
+}

@@ -116,3 +116,42 @@ class PaginatedBooksResponse(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+
+class BookProgressUpdate(BaseModel):
+    """Schema for dedicated reading progress updates."""
+    current_page: int = Field(..., ge=0, description="Updated current page number reached")
+    notes: Optional[str] = Field(default=None, description="Optional reading notes or reflections")
+    rating: Optional[int] = Field(default=None, ge=1, le=5, description="Optional book rating (1-5)")
+
+
+class ReadingStatsResponse(BaseModel):
+    """Aggregated reading statistics for the authenticated user."""
+    total_books: int = Field(..., ge=0, description="Total books in personal library")
+    books_want_to_read: int = Field(..., ge=0, description="Number of books marked want_to_read")
+    books_reading: int = Field(..., ge=0, description="Number of books currently being read")
+    books_finished: int = Field(..., ge=0, description="Number of finished books")
+    total_pages_read: int = Field(..., ge=0, description="Sum of current pages read across all books")
+    completion_rate: float = Field(
+        ...,
+        ge=0.0,
+        le=100.0,
+        description="Finished books / total books * 100 (0.0 if total_books == 0)",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProgressUpdateResponse(BaseModel):
+    """Response returned upon updating reading progress."""
+    book: BookResponse
+    milestone: Optional[str] = Field(
+        default=None,
+        description="Milestone reached during this update: 'quarter', 'half', 'three_quarters', 'completed', or None",
+    )
+    milestone_label: Optional[str] = Field(
+        default=None,
+        description="Human-readable milestone description",
+    )
+
+    model_config = ConfigDict(from_attributes=True)
+

@@ -8,6 +8,7 @@ export default function BookCard({
   onEdit,
   onDelete,
   onQuickProgress,
+  onUpdateProgress,
   onManageShelves,
   currentShelf = null,
   onRemoveFromShelf = null,
@@ -45,22 +46,20 @@ export default function BookCard({
   }
 
   const handleAdvance10 = () => {
-    const next = Math.min(
-      book.total_pages ? book.total_pages : book.current_page + 10,
-      book.current_page + 10
-    )
-    const isNowFinished = book.total_pages && next >= book.total_pages
-    onQuickProgress(book.id, {
-      current_page: next,
-      status: isNowFinished ? 'finished' : book.status === 'want_to_read' ? 'reading' : book.status,
-    })
+    const next = book.total_pages
+      ? Math.min(book.total_pages, book.current_page + 10)
+      : book.current_page + 10
+    if (onQuickProgress) {
+      onQuickProgress(book.id, { current_page: next })
+    }
   }
 
   const handleMarkFinished = () => {
-    onQuickProgress(book.id, {
-      status: 'finished',
-      current_page: book.total_pages || book.current_page,
-    })
+    if (onQuickProgress) {
+      onQuickProgress(book.id, {
+        current_page: book.total_pages || book.current_page,
+      })
+    }
   }
 
   // Find names of shelves this book is currently assigned to
@@ -154,6 +153,7 @@ export default function BookCard({
             style={{
               display: 'flex',
               justifyContent: 'space-between',
+              alignItems: 'center',
               fontSize: 'var(--font-size-xs)',
               color: 'var(--text-secondary)',
               marginBottom: '4px',
@@ -163,7 +163,18 @@ export default function BookCard({
               Page {book.current_page}
               {book.total_pages ? ` of ${book.total_pages}` : ''}
             </span>
-            {book.progress_percentage !== null && <span>{book.progress_percentage}%</span>}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              {book.total_pages && book.status !== 'finished' && book.total_pages > book.current_page && (
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  ({book.total_pages - book.current_page} left)
+                </span>
+              )}
+              {book.progress_percentage !== null && (
+                <span style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
+                  {book.progress_percentage}%
+                </span>
+              )}
+            </div>
           </div>
 
           {book.total_pages ? (
@@ -223,27 +234,53 @@ export default function BookCard({
           gap: 'var(--space-xs)',
         }}
       >
-        {/* Quick Progress Buttons */}
-        {onQuickProgress && book.status !== 'finished' && (
+        {/* Quick Progress Buttons & Tracker Button */}
+        {(onQuickProgress || onUpdateProgress) && (
           <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={handleAdvance10}
-              style={{ flex: 1, padding: '4px 8px', fontSize: 'var(--font-size-xs)' }}
-              title="Add 10 pages to progress"
-            >
-              +10 Pages
-            </button>
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={handleMarkFinished}
-              style={{ flex: 1, padding: '4px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--success)' }}
-              title="Mark book as finished"
-            >
-              ✓ Finished
-            </button>
+            {onUpdateProgress && (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => onUpdateProgress(book)}
+                style={{
+                  flex: 1.2,
+                  padding: '5px 8px',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--accent)',
+                  borderColor: 'rgba(147, 51, 234, 0.4)',
+                  fontWeight: 600,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '4px',
+                }}
+                title="Update reading progress, pages, rating and notes"
+              >
+                <span>📈</span> Progress
+              </button>
+            )}
+            {onQuickProgress && book.status !== 'finished' && (
+              <>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleAdvance10}
+                  style={{ flex: 1, padding: '5px 8px', fontSize: 'var(--font-size-xs)' }}
+                  title="Add 10 pages to progress"
+                >
+                  +10
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={handleMarkFinished}
+                  style={{ flex: 1, padding: '5px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--success)' }}
+                  title="Mark book as finished"
+                >
+                  ✓ Finish
+                </button>
+              </>
+            )}
           </div>
         )}
 

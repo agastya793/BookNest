@@ -12,6 +12,9 @@ from app.schemas.book import (
     BookResponse,
     BookStatus,
     PaginatedBooksResponse,
+    BookProgressUpdate,
+    ReadingStatsResponse,
+    ProgressUpdateResponse,
 )
 from app.schemas.shelf import (
     ShelfBase,

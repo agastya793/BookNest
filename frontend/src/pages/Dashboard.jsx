@@ -7,11 +7,15 @@ import ShelfSidebar from '../components/ShelfSidebar'
 import ShelfModal from '../components/ShelfModal'
 import AssignShelfModal from '../components/AssignShelfModal'
 import ShelfShareModal from '../components/ShelfShareModal'
+import ReadingStatsBanner from '../components/ReadingStatsBanner'
+import ProgressModal from '../components/ProgressModal'
 import {
   getBooksApi,
   createBookApi,
   updateBookApi,
   deleteBookApi,
+  updateBookProgressApi,
+  getReadingStatsApi,
 } from '../api/books'
 import {
   getShelvesApi,
@@ -60,6 +64,20 @@ export default function Dashboard() {
   })
   const [assignModalBook, setAssignModalBook] = useState(null)
   const [shareModalShelf, setShareModalShelf] = useState(null)
+
+  // Reading Statistics State (Phase 6)
+  const [readingStats, setReadingStats] = useState(null)
+  const [readingStatsLoading, setReadingStatsLoading] = useState(false)
+  const [readingStatsError, setReadingStatsError] = useState(null)
+
+  // Progress Modal State (Phase 6)
+  const [progressModalState, setProgressModalState] = useState({
+    isOpen: false,
+    book: null,
+  })
+
+  // Milestone Celebration Toast State (Phase 6)
+  const [milestoneToast, setMilestoneToast] = useState(null)
 
   // Collapsible Architecture Diagnostics
   const [showDiagnostics, setShowDiagnostics] = useState(false)
@@ -135,15 +153,88 @@ export default function Dashboard() {
     }
   }, [page, pageSize, selectedShelfId, statusFilter, searchTerm, sortBy, sortDir])
 
+  // Fetch reading statistics from dedicated Phase 6 summary endpoint
+  const fetchReadingStats = useCallback(async () => {
+    setReadingStatsLoading(true)
+    setReadingStatsError(null)
+    try {
+      const res = await getReadingStatsApi()
+      setReadingStats(res.data)
+    } catch (err) {
+      console.error('Failed to load reading statistics:', err)
+      setReadingStatsError('Failed to load reading statistics.')
+    } finally {
+      setReadingStatsLoading(false)
+    }
+  }, [])
+
+  // Auto-dismiss milestone notification toast after 4.5 seconds
+  useEffect(() => {
+    if (milestoneToast) {
+      const timer = setTimeout(() => {
+        setMilestoneToast(null)
+      }, 4500)
+      return () => clearTimeout(timer)
+    }
+  }, [milestoneToast])
+
   // Initial load and filter sync
   useEffect(() => {
     fetchShelves()
     fetchTotalCatalogCount()
-  }, [fetchShelves, fetchTotalCatalogCount])
+    fetchReadingStats()
+  }, [fetchShelves, fetchTotalCatalogCount, fetchReadingStats])
 
   useEffect(() => {
     fetchBooks()
   }, [fetchBooks])
+
+  // Reading Progress Modal Handlers (Phase 6)
+  const handleOpenProgressModal = (book) => {
+    setProgressModalState({ isOpen: true, book })
+  }
+
+  const handleCloseProgressModal = () => {
+    setProgressModalState({ isOpen: false, book: null })
+  }
+
+  const getMilestoneLabel = (milestone) => {
+    switch (milestone) {
+      case 'quarter':
+        return '🎉 Quarter Way Through! (25%)'
+      case 'half':
+        return '⚡ Halfway Mark Reached! (50%)'
+      case 'three_quarters':
+        return '🔥 In the Final Stretch! (75%)'
+      case 'completed':
+        return '🏆 Book Completed! (100%)'
+      default:
+        return 'Milestone Reached!'
+    }
+  }
+
+  // Unified Progress Save Handler
+  const handleSaveProgress = async (bookId, progressData) => {
+    const res = await updateBookProgressApi(bookId, progressData)
+    await Promise.all([fetchBooks(), fetchReadingStats()])
+    if (res.data?.milestone) {
+      setMilestoneToast({
+        milestone: res.data.milestone,
+        label: res.data.milestone_label || getMilestoneLabel(res.data.milestone),
+        bookTitle: res.data.book?.title || 'Book',
+      })
+    }
+    return res.data
+  }
+
+  // Quick Progress Action (routes through unified updateBookProgressApi)
+  const handleQuickProgress = async (bookId, patchData) => {
+    try {
+      await handleSaveProgress(bookId, patchData)
+    } catch (err) {
+      console.error('Quick progress update failed:', err)
+    }
+  }
 
   // Book CRUD Handlers
   const handleOpenAddBookModal = () => {
@@ -170,23 +261,14 @@ export default function Dashboard() {
         }
       }
     }
-    await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount()])
-  }
-
-  const handleQuickProgress = async (bookId, patchData) => {
-    try {
-      await updateBookApi(bookId, patchData)
-      await fetchBooks()
-    } catch (err) {
-      console.error('Quick progress update failed:', err)
-    }
+    await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats()])
   }
 
   const handleDeleteBook = async (bookId, bookTitle) => {
     if (window.confirm(`Are you sure you want to remove "${bookTitle}" from your library?`)) {
       try {
         await deleteBookApi(bookId)
-        await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount()])
+        await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats()])
       } catch (err) {
         alert(err.response?.data?.detail || 'Failed to delete book.')
       }
@@ -257,13 +339,7 @@ export default function Dashboard() {
     await Promise.all([fetchBooks(), fetchShelves()])
   }
 
-  // Calculate statistics from current view
-  const stats = {
-    total: selectedShelfId ? total : totalCatalogCount,
-    reading: books.filter((b) => b.status === 'reading').length,
-    wantToRead: books.filter((b) => b.status === 'want_to_read').length,
-    finished: books.filter((b) => b.status === 'finished').length,
-  }
+
 
   // Diagnostics Handlers
   const testMe = async () => {
@@ -447,41 +523,8 @@ export default function Dashboard() {
 
       {/* Main Content Area */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xl)' }}>
-        {/* Statistics Banner */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-            gap: 'var(--space-md)',
-          }}
-        >
-          <div className="card" style={{ padding: 'var(--space-md)' }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>
-              {selectedShelfId ? `BOOKS ON "${activeShelf?.name?.toUpperCase()}"` : 'TOTAL BOOKS IN LIBRARY'}
-            </div>
-            <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700, color: 'var(--text-primary)' }}>
-              {stats.total}
-            </div>
-          </div>
-          <div className="card" style={{ padding: 'var(--space-md)' }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>CURRENTLY READING</div>
-            <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700, color: 'var(--accent)' }}>
-              {stats.reading}
-            </div>
-          </div>
-          <div className="card" style={{ padding: 'var(--space-md)' }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>WANT TO READ</div>
-            <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700, color: 'var(--info)' }}>
-              {stats.wantToRead}
-            </div>
-          </div>
-          <div className="card" style={{ padding: 'var(--space-md)' }}>
-            <div style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>FINISHED</div>
-            <div style={{ fontSize: 'var(--font-size-2xl)', fontWeight: 700, color: 'var(--success)' }}>
-              {stats.finished}
-            </div>
-          </div>
-        </div>
+        {/* Phase 6 Reading Statistics Banner */}
+        <ReadingStatsBanner stats={readingStats} loading={readingStatsLoading} />
 
         {/* Responsive Two-Column Layout: Shelves Sidebar on left, Catalog on right */}
         <div className="dashboard-layout">
@@ -761,6 +804,7 @@ export default function Dashboard() {
                         onEdit={isBookOwner ? handleOpenEditBookModal : null}
                         onDelete={isBookOwner ? handleDeleteBook : null}
                         onQuickProgress={isBookOwner ? handleQuickProgress : null}
+                        onUpdateProgress={isBookOwner ? handleOpenProgressModal : null}
                         onManageShelves={isBookOwner ? handleOpenAssignModal : null}
                         currentShelf={activeShelf}
                         onRemoveFromShelf={activeShelf?.role !== 'viewer' ? handleRemoveFromShelf : null}
@@ -1001,6 +1045,68 @@ export default function Dashboard() {
           await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
         }}
       />
+
+      {/* Reading Progress Tracker Modal (Phase 6) */}
+      <ProgressModal
+        isOpen={progressModalState.isOpen}
+        onClose={handleCloseProgressModal}
+        onSaveProgress={handleSaveProgress}
+        book={progressModalState.book}
+      />
+
+      {/* Milestone Celebration Toast (Phase 6) */}
+      {milestoneToast && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            zIndex: 9999,
+            background: 'var(--bg-card)',
+            border: '1px solid var(--accent)',
+            boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 0 15px rgba(147, 51, 234, 0.3)',
+            borderRadius: 'var(--radius-lg)',
+            padding: 'var(--space-md) var(--space-lg)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 'var(--space-md)',
+            maxWidth: '400px',
+          }}
+        >
+          <div style={{ fontSize: '1.8rem', lineHeight: 1 }}>
+            {milestoneToast.milestone === 'completed'
+              ? '🏆'
+              : milestoneToast.milestone === 'three_quarters'
+              ? '🔥'
+              : milestoneToast.milestone === 'half'
+              ? '⚡'
+              : '🎉'}
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: 'var(--font-size-sm)', color: 'var(--text-primary)' }}>
+              {milestoneToast.label}
+            </div>
+            <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-secondary)', marginTop: '2px' }}>
+              {milestoneToast.bookTitle}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setMilestoneToast(null)}
+            style={{
+              background: 'transparent',
+              border: 'none',
+              color: 'var(--text-muted)',
+              fontSize: '1.2rem',
+              cursor: 'pointer',
+              padding: '2px 6px',
+            }}
+            title="Dismiss notification"
+          >
+            &times;
+          </button>
+        </div>
+      )}
     </div>
   )
 }
