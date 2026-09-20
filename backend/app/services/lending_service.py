@@ -14,6 +14,7 @@ from app.schemas.lending import (
     LendBookCreate,
     LendingResponse,
 )
+from app.services.activity_service import create_activity_log
 
 
 def lend_book(
@@ -86,21 +87,11 @@ def lend_book(
         lent_at=now,
     )
     db.add(lending)
+    db.flush()
 
-    # 6. Commit with database-level race protection
-    try:
-        db.commit()
-        db.refresh(lending)
-    except IntegrityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Book is already actively lent to someone else",
-        )
-
-    # 7. Record exactly ONE ActivityLog entry
-    lender = db.query(User).filter(User.id == lender_id).first()
-    activity = ActivityLog(
+    # 6. Record exactly ONE ActivityLog entry atomically in the same transaction
+    create_activity_log(
+        db=db,
         user_id=lender_id,
         action="book_lent",
         details={
@@ -111,9 +102,19 @@ def lend_book(
             "borrower_name": borrower.name,
             "borrower_email": borrower.email,
         },
+        shelf_id=None,
     )
-    db.add(activity)
-    db.commit()
+
+    # 7. Commit with database-level race protection
+    try:
+        db.commit()
+        db.refresh(lending)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Book is already actively lent to someone else",
+        )
 
     return LendingResponse(
         id=lending.id,
@@ -177,8 +178,9 @@ def return_book(db: Session, user_id: UUID, lending_id: UUID) -> LendingResponse
     lending.is_active = False
     lending.returned_at = now
 
-    # Record exactly ONE ActivityLog entry
-    activity = ActivityLog(
+    # Record exactly ONE ActivityLog entry atomically in the same transaction
+    create_activity_log(
+        db=db,
         user_id=user_id,
         action="book_returned",
         details={
@@ -189,8 +191,8 @@ def return_book(db: Session, user_id: UUID, lending_id: UUID) -> LendingResponse
             "borrower_name": lending.borrower.name if lending.borrower else "",
             "returned_by": str(user_id),
         },
+        shelf_id=None,
     )
-    db.add(activity)
     db.commit()
     db.refresh(lending)
 

@@ -11,6 +11,7 @@ import ReadingStatsBanner from '../components/ReadingStatsBanner'
 import ProgressModal from '../components/ProgressModal'
 import LendBookModal from '../components/LendBookModal'
 import LendingHistoryModal from '../components/LendingHistoryModal'
+import ActivityFeed from '../components/ActivityFeed'
 import {
   getBooksApi,
   createBookApi,
@@ -92,6 +93,14 @@ export default function Dashboard() {
   const [borrowedBooks, setBorrowedBooks] = useState([])
   const [lendModalBook, setLendModalBook] = useState(null)
   const [historyModalBook, setHistoryModalBook] = useState(null)
+
+  // Activity Feed State (Phase 8)
+  const [showActivityFeed, setShowActivityFeed] = useState(false)
+  const [activityRefreshTrigger, setActivityRefreshTrigger] = useState(0)
+
+  const triggerActivityRefresh = useCallback(() => {
+    setActivityRefreshTrigger((prev) => prev + 1)
+  }, [])
 
   // Collapsible Architecture Diagnostics
   const [showDiagnostics, setShowDiagnostics] = useState(false)
@@ -201,6 +210,7 @@ export default function Dashboard() {
     try {
       await returnBookApi(lendingId)
       await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats()])
+      triggerActivityRefresh()
     } catch (err) {
       console.error('Failed to return book:', err)
       alert(err.response?.data?.detail || 'Failed to return book.')
@@ -209,6 +219,7 @@ export default function Dashboard() {
 
   const handleLendSuccess = async () => {
     await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats()])
+    triggerActivityRefresh()
     setLendModalBook(null)
   }
 
@@ -262,6 +273,7 @@ export default function Dashboard() {
   const handleSaveProgress = async (bookId, progressData) => {
     const res = await updateBookProgressApi(bookId, progressData)
     await Promise.all([fetchBooks(), fetchReadingStats()])
+    triggerActivityRefresh()
     if (res.data?.milestone) {
       setMilestoneToast({
         milestone: res.data.milestone,
@@ -307,6 +319,7 @@ export default function Dashboard() {
       }
     }
     await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats()])
+    triggerActivityRefresh()
   }
 
   const handleDeleteBook = async (bookId, bookTitle) => {
@@ -314,6 +327,7 @@ export default function Dashboard() {
       try {
         await deleteBookApi(bookId)
         await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats()])
+        triggerActivityRefresh()
       } catch (err) {
         alert(err.response?.data?.detail || 'Failed to delete book.')
       }
@@ -869,11 +883,29 @@ export default function Dashboard() {
                       : `Organize, track reading milestones, and manage your collection`}
                   </p>
                 </div>
-                {activeShelf?.role !== 'viewer' && (
-                  <button className="btn-primary" onClick={handleOpenAddBookModal}>
-                    + Add Book
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setShowActivityFeed((prev) => !prev)}
+                    style={{
+                      fontSize: 'var(--font-size-sm)',
+                      background: showActivityFeed ? 'var(--accent)' : 'var(--bg-input)',
+                      color: showActivityFeed ? '#fff' : 'var(--text-primary)',
+                      borderColor: showActivityFeed ? 'var(--accent)' : 'var(--border)',
+                      fontWeight: 600,
+                    }}
+                    id="activity-feed-toggle-btn"
+                    title={showActivityFeed ? 'Hide Activity Feed' : 'Show Activity Feed'}
+                  >
+                    ⚡ Activity Feed {showActivityFeed ? '▾' : '▸'}
                   </button>
-                )}
+                  {activeShelf?.role !== 'viewer' && (
+                    <button className="btn-primary" onClick={handleOpenAddBookModal} id="add-book-btn">
+                      + Add Book
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Search, Filter Tabs & Sort Controls */}
@@ -948,6 +980,15 @@ export default function Dashboard() {
                 </div>
               </div>
             </div>
+
+            {/* Phase 8 Activity Feed Section */}
+            {showActivityFeed && (
+              <ActivityFeed
+                refreshTrigger={activityRefreshTrigger}
+                onClose={() => setShowActivityFeed(false)}
+                currentShelfId={selectedShelfId}
+              />
+            )}
 
             {/* Books Catalog Grid */}
             {error && (
@@ -1279,6 +1320,7 @@ export default function Dashboard() {
             setPage(1)
           }
           await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
+          triggerActivityRefresh()
         }}
       />
 

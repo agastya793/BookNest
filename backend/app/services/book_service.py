@@ -11,12 +11,14 @@ from app.models.lending import Lending
 from app.models.shelf import Shelf
 from app.models.shelf_book import ShelfBook
 from app.schemas.book import BookCreate, BookUpdate, BookProgressUpdate
+from app.services.activity_service import create_activity_log
 
 
 def create_book(db: Session, user_id: UUID, book_in: BookCreate) -> Book:
     """
     Create a new book record owned by the authenticated user.
     Delegates all validation and status transition lifecycle handling to apply_reading_lifecycle().
+    Records exactly one 'book_added' ActivityLog event atomically.
     """
     book_data = book_in.model_dump()
 
@@ -40,9 +42,27 @@ def create_book(db: Session, user_id: UUID, book_in: BookCreate) -> Book:
     )
 
     db.add(book)
+    db.flush()
+
+    # Atomically record exactly one book_added ActivityLog event in the same transaction
+    create_activity_log(
+        db=db,
+        user_id=user_id,
+        action="book_added",
+        details={
+            "book_id": str(book.id),
+            "title": book.title,
+            "author": book.author,
+            "status": book.status,
+            "total_pages": book.total_pages,
+        },
+        shelf_id=None,
+    )
+
     db.commit()
     db.refresh(book)
     return book
+
 
 
 def get_book(db: Session, user_id: UUID, book_id: UUID) -> Book:
@@ -311,7 +331,7 @@ def update_book(
     new_finished_date = update_data.get("finished_date")
 
     # Delegate page boundary check and status/finished_date lifecycle to single source of truth
-    apply_reading_lifecycle(
+    meta = apply_reading_lifecycle(
         book=book,
         new_current_page=new_current_page,
         new_total_pages=new_total_pages,
@@ -326,6 +346,26 @@ def update_book(
             setattr(book, key, value)
 
     book.updated_at = datetime.now(timezone.utc)
+
+    # Log status_changed only if status actually changed
+    if meta["status_changed"]:
+        create_activity_log(
+            db=db,
+            user_id=user_id,
+            action="status_changed",
+            details={
+                "book_id": str(book.id),
+                "title": book.title,
+                "old_status": meta["old_status"],
+                "new_status": meta["new_status"],
+                "old_page": meta["old_page"],
+                "new_page": meta["new_page"],
+                "total_pages": book.total_pages,
+                "progress_percentage": calculate_progress_percentage(book.current_page, book.total_pages),
+            },
+            shelf_id=None,
+        )
+
     db.commit()
     db.refresh(book)
     return book
@@ -375,7 +415,8 @@ def update_book_progress(
 
     # Activity Logging Safeguard: Log at most ONE record, prioritizing status_changed
     if meta["status_changed"]:
-        log = ActivityLog(
+        create_activity_log(
+            db=db,
             user_id=user_id,
             action="status_changed",
             details={
@@ -389,10 +430,11 @@ def update_book_progress(
                 "progress_percentage": new_pct,
                 "milestone": milestone,
             },
+            shelf_id=None,
         )
-        db.add(log)
     elif meta["page_changed"]:
-        log = ActivityLog(
+        create_activity_log(
+            db=db,
             user_id=user_id,
             action="progress_updated",
             details={
@@ -404,11 +446,12 @@ def update_book_progress(
                 "progress_percentage": new_pct,
                 "milestone": milestone,
             },
+            shelf_id=None,
         )
-        db.add(log)
 
     db.commit()
     db.refresh(book)
+
 
     return {
         "book": book,

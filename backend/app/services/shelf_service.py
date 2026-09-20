@@ -19,6 +19,8 @@ from app.schemas.shelf import (
     ShelfShareCreate,
     ShelfUpdate,
 )
+from app.services.activity_service import create_activity_log
+
 
 
 def get_shelf_with_role(
@@ -476,6 +478,23 @@ def share_shelf(
         role=share_in.role,
     )
     db.add(shelf_share)
+
+    # Atomically log shelf_shared in the same transaction
+    create_activity_log(
+        db=db,
+        user_id=owner_id,
+        action="shelf_shared",
+        details={
+            "shelf_id": str(shelf.id),
+            "shelf_name": shelf.name,
+            "collaborator_id": str(invitee.id),
+            "collaborator_email": invitee.email,
+            "collaborator_name": invitee.name,
+            "role": share_in.role,
+        },
+        shelf_id=shelf.id,
+    )
+
     try:
         db.commit()
         db.refresh(shelf_share)
@@ -558,11 +577,30 @@ def update_shelf_share(
             detail="Collaborator share not found",
         )
 
-    share.role = role
-    db.commit()
-    db.refresh(share)
-
+    old_role = share.role
     user = db.query(User).filter(User.id == share.user_id).first()
+
+    # Only log and update if role actually changed
+    if old_role != role:
+        share.role = role
+        create_activity_log(
+            db=db,
+            user_id=owner_id,
+            action="shelf_role_changed",
+            details={
+                "shelf_id": str(shelf.id),
+                "shelf_name": shelf.name,
+                "collaborator_id": str(share.user_id),
+                "collaborator_email": user.email if user else "",
+                "collaborator_name": user.name if user else "",
+                "old_role": old_role,
+                "new_role": role,
+            },
+            shelf_id=shelf.id,
+        )
+        db.commit()
+        db.refresh(share)
+
     return CollaboratorResponse(
         id=share.id,
         shelf_id=share.shelf_id,
@@ -607,5 +645,23 @@ def delete_shelf_share(
             detail="Collaborators cannot remove other collaborators",
         )
 
+    target_user = db.query(User).filter(User.id == share.user_id).first()
+    create_activity_log(
+        db=db,
+        user_id=user_id,
+        action="shelf_share_removed",
+        details={
+            "shelf_id": str(shelf.id),
+            "shelf_name": shelf.name,
+            "collaborator_id": str(share.user_id),
+            "collaborator_email": target_user.email if target_user else "",
+            "collaborator_name": target_user.name if target_user else "",
+            "previous_role": share.role,
+            "removed_by": "owner" if current_role == "owner" else "self",
+        },
+        shelf_id=shelf.id,
+    )
+
     db.delete(share)
     db.commit()
+

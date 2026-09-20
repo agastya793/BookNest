@@ -34,6 +34,10 @@ from app.schemas.lending import (
     BorrowedBookResponse,
     LendingSummary,
 )
+from app.schemas.activity import (
+    ActivityLogResponse,
+    ActivityListResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -64,4 +68,7 @@ __all__ = [
     "LendingResponse",
     "BorrowedBookResponse",
     "LendingSummary",
+    "ActivityLogResponse",
+    "ActivityListResponse",
 ]
+
