@@ -13,7 +13,7 @@ Verifies:
    - 50% -> 75% triggers milestone 'three_quarters'
    - 75% -> 100% triggers milestone 'completed' and auto-transitions to 'finished' with finished_date set.
 5. Regression from finished: reducing page reverts status to 'reading' and clears finished_date.
-6. Books without total_pages: allows page updates cleanly with null percentage.
+6. Books without total_pages: progress update rejected with 422 ("Cannot update reading progress because total_pages is not set").
 7. Reading statistics endpoint (GET /api/books/stats/summary):
    - Correctly aggregates total_books, status counts, total_pages_read, and completion_rate.
    - Empty library returns completion_rate = 0.0.
@@ -177,22 +177,34 @@ async def run_tests():
         print("   [OK] Reducing current_page on finished book reverted status to reading and cleared finished_date.")
 
         # Test 6: Book without total_pages
-        log_step(6, "Testing progress on book without total_pages...")
+        log_step(6, "Testing progress validation when total_pages is unset (422)...")
         res = await client.post("/books", headers=headers_a, json={
             "title": "Untracked Pages Book",
             "author": "Author X",
             "status": "reading",
         })
         assert res.status_code == 201
-        book2_id = res.json()["id"]
+        book2 = res.json()
+        book2_id = book2["id"]
+        assert book2["total_pages"] is None
+        assert book2["current_page"] == 0
 
-        res = await client.post(f"/books/{book2_id}/progress", headers=headers_a, json={"current_page": 45})
-        assert res.status_code == 200
-        p_no_total = res.json()
-        assert p_no_total["book"]["current_page"] == 45
-        assert p_no_total["book"]["progress_percentage"] is None
-        assert p_no_total["milestone"] is None
-        print("   [OK] Book without total_pages cleanly tracked page 45 with null percentage.")
+        # Attempt: POST /api/books/{book_id}/progress with current_page = 1 -> Expect HTTP 422
+        res = await client.post(f"/books/{book2_id}/progress", headers=headers_a, json={"current_page": 1})
+        assert res.status_code == 422, f"Expected 422 for progress update without total_pages, got {res.status_code}: {res.text}"
+        err_detail = res.json().get("detail", "")
+        assert "Cannot update reading progress because total_pages is not set" in err_detail or "total_pages is not set" in err_detail, f"Unexpected error detail: {err_detail}"
+
+        # Verify the database/book state was not changed
+        db = SessionLocal()
+        try:
+            db_book2 = db.query(Book).filter(Book.id == uuid.UUID(book2_id)).first()
+            assert db_book2.current_page == 0, f"Expected current_page=0, got {db_book2.current_page}"
+            assert db_book2.total_pages is None
+            assert db_book2.status == "reading"
+        finally:
+            db.close()
+        print("   [OK] Updating progress on book without total_pages correctly rejected with 422; database state unchanged.")
 
         # Test 7: Multi-book reading statistics calculation
         log_step(7, "Testing reading statistics calculation with multiple books...")
@@ -208,9 +220,9 @@ async def run_tests():
 
         # Now User A has:
         # 1. The Way of Kings: status='reading', current_page=180
-        # 2. Untracked Pages Book: status='reading', current_page=45
+        # 2. Untracked Pages Book: status='reading', current_page=0 (progress update was rejected)
         # 3. Atomic Habits: status='finished', current_page=300
-        # Total pages read = 180 + 45 + 300 = 525
+        # Total pages read = 180 + 0 + 300 = 480
         # Total books = 3, finished = 1 -> completion_rate = round(1/3 * 100, 1) = 33.3%
 
         res = await client.get("/books/stats/summary", headers=headers_a)
@@ -220,9 +232,9 @@ async def run_tests():
         assert stats["books_want_to_read"] == 0
         assert stats["books_reading"] == 2
         assert stats["books_finished"] == 1
-        assert stats["total_pages_read"] == 525
+        assert stats["total_pages_read"] == 480
         assert stats["completion_rate"] == 33.3
-        print(f"   [OK] Reading stats verified: total_books=3, pages=525, completion_rate=33.3%")
+        print(f"   [OK] Reading stats verified: total_books=3, pages=480, completion_rate=33.3%")
 
         # Test 8: Multi-user isolation on progress endpoint
         log_step(8, "Testing multi-user isolation on progress endpoint...")

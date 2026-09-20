@@ -214,10 +214,14 @@ def apply_reading_lifecycle(
     new_status: Optional[str] = None,
     new_finished_date: Optional[datetime] = None,
     auto_advance_status: bool = False,
+    is_progress_update: bool = False,
 ) -> dict:
     """
     Single source of truth for:
-    1. Validation: current_page non-negative, current_page <= total_pages (raises 422 if violated)
+    1. Validation:
+       - current_page non-negative (raises 422)
+       - progress cannot be recorded when total_pages is unset (raises 422)
+       - current_page <= total_pages (raises 422 if violated)
     2. Status resolution:
        - If new_status explicitly provided, it takes precedence.
        - If auto_advance_status=True:
@@ -244,6 +248,13 @@ def apply_reading_lifecycle(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="current_page cannot be negative",
+        )
+
+    # Progress cannot be recorded or non-zero current_page set when total_pages is unset
+    if (effective_total is None or effective_total <= 0) and (is_progress_update or effective_current > 0):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Cannot update reading progress because total_pages is not set",
         )
 
     if effective_total is not None and effective_current > effective_total:
@@ -392,11 +403,12 @@ def update_book_progress(
     # Pre-update progress percentage for milestone detection
     prev_pct = calculate_progress_percentage(book.current_page, book.total_pages)
 
-    # Apply lifecycle with auto_advance_status=True
+    # Apply lifecycle with auto_advance_status=True and is_progress_update=True
     meta = apply_reading_lifecycle(
         book=book,
         new_current_page=progress_in.current_page,
         auto_advance_status=True,
+        is_progress_update=True,
     )
 
     # Post-update progress percentage
