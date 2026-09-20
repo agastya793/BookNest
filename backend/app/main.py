@@ -28,3 +28,14 @@ def health_check():
     """Health check endpoint."""
     return {"status": "ok"}
 
+
+# Socket.IO ASGI application wrapper (Safeguard 1: preserves pure FastAPI `app` compatibility)
+import socketio
+from app.services.realtime_service import sio
+
+socket_app = socketio.ASGIApp(
+    socketio_server=sio,
+    other_asgi_app=app,
+    socketio_path="socket.io",
+)
+

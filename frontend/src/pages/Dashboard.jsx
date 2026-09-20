@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
+import { useSocket, useShelfSubscription } from '../hooks/useSocket'
 import Navbar from '../components/Navbar'
 import BookCard from '../components/BookCard'
 import BookModal from '../components/BookModal'
@@ -244,6 +245,108 @@ export default function Dashboard() {
   useEffect(() => {
     fetchBooks()
   }, [fetchBooks])
+
+  // =============================================================================
+  // Real-time WebSocket Synchronizers (Phase 9 & Safeguard 5)
+  // Lightweight refetches preserve active page, filters, sort, and selected shelf
+  // =============================================================================
+
+  // Automatically join active shelf collaborative room
+  useShelfSubscription(selectedShelfId)
+
+  // 1. Live Book CRUD Events
+  useSocket('book_added', useCallback(() => {
+    fetchBooks()
+    fetchReadingStats()
+    triggerActivityRefresh()
+  }, [fetchBooks, fetchReadingStats, triggerActivityRefresh]))
+
+  useSocket('book_updated', useCallback(() => {
+    fetchBooks()
+    fetchReadingStats()
+  }, [fetchBooks, fetchReadingStats]))
+
+  useSocket('book_deleted', useCallback(() => {
+    fetchBooks()
+    fetchReadingStats()
+    fetchShelves()
+  }, [fetchBooks, fetchReadingStats, fetchShelves]))
+
+  // 2. Live Reading Progress & Milestones
+  useSocket('progress_updated', useCallback(() => {
+    fetchBooks()
+    fetchReadingStats()
+    triggerActivityRefresh()
+  }, [fetchBooks, fetchReadingStats, triggerActivityRefresh]))
+
+  // 3. Live Shelf Collaboration Events
+  useSocket('shelf_created', useCallback(() => {
+    fetchShelves()
+  }, [fetchShelves]))
+
+  useSocket('shelf_renamed', useCallback(() => {
+    fetchShelves()
+  }, [fetchShelves]))
+
+  useSocket('shelf_deleted', useCallback((data) => {
+    if (selectedShelfId === data?.shelf_id) {
+      setSelectedShelfId(null)
+    }
+    fetchShelves()
+    fetchBooks()
+  }, [selectedShelfId, fetchShelves, fetchBooks]))
+
+  useSocket('shelf_book_added', useCallback(() => {
+    fetchShelves()
+    fetchBooks()
+  }, [fetchShelves, fetchBooks]))
+
+  useSocket('shelf_book_removed', useCallback(() => {
+    fetchShelves()
+    fetchBooks()
+  }, [fetchShelves, fetchBooks]))
+
+  useSocket('shelf_shared', useCallback(() => {
+    fetchShelves()
+    triggerActivityRefresh()
+  }, [fetchShelves, triggerActivityRefresh]))
+
+  useSocket('shelf_role_changed', useCallback(() => {
+    fetchShelves()
+    triggerActivityRefresh()
+  }, [fetchShelves, triggerActivityRefresh]))
+
+  useSocket('shelf_share_removed', useCallback(() => {
+    fetchShelves()
+    triggerActivityRefresh()
+  }, [fetchShelves, triggerActivityRefresh]))
+
+  // Instant room revocation notification (Safeguard 2)
+  useSocket('shelf_access_revoked', useCallback((data) => {
+    if (selectedShelfId === data?.shelf_id) {
+      setSelectedShelfId(null)
+    }
+    fetchShelves()
+    fetchBooks()
+  }, [selectedShelfId, fetchShelves, fetchBooks]))
+
+  // 4. Live Lending Events
+  useSocket('book_lent', useCallback(() => {
+    fetchLendingData()
+    fetchBooks()
+    triggerActivityRefresh()
+  }, [fetchLendingData, fetchBooks, triggerActivityRefresh]))
+
+  useSocket('book_returned', useCallback(() => {
+    fetchLendingData()
+    fetchBooks()
+    triggerActivityRefresh()
+  }, [fetchLendingData, fetchBooks, triggerActivityRefresh]))
+
+  // 5. Live Activity Feed Sync
+  useSocket('activity_created', useCallback(() => {
+    triggerActivityRefresh()
+  }, [triggerActivityRefresh]))
 
   // Reading Progress Modal Handlers (Phase 6)
   const handleOpenProgressModal = (book) => {

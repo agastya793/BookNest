@@ -16,7 +16,7 @@ from app.schemas.shelf import (
     ShelfShareUpdate,
     ShelfUpdate,
 )
-from app.services import shelf_service
+from app.services import shelf_service, realtime_service
 
 router = APIRouter(prefix="/api/shelves", tags=["Shelves"])
 
@@ -27,7 +27,7 @@ router = APIRouter(prefix="/api/shelves", tags=["Shelves"])
     status_code=status.HTTP_201_CREATED,
     summary="Create a new custom shelf",
 )
-def create_shelf(
+async def create_shelf(
     shelf_in: ShelfCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -36,7 +36,9 @@ def create_shelf(
     Create a new shelf for the authenticated user.
     Enforces name uniqueness per user; returns 409 Conflict if name already exists.
     """
-    return shelf_service.create_shelf(db, current_user.id, shelf_in)
+    shelf = shelf_service.create_shelf(db, current_user.id, shelf_in)
+    await realtime_service.broadcast_shelf_event("shelf_created", shelf.id, {"name": shelf.name}, user_id=current_user.id)
+    return shelf
 
 
 @router.get(
@@ -76,7 +78,7 @@ def get_shelf(
     response_model=ShelfResponse,
     summary="Rename a custom shelf",
 )
-def patch_shelf(
+async def patch_shelf(
     shelf_id: UUID,
     shelf_in: ShelfUpdate,
     current_user: User = Depends(get_current_user),
@@ -86,7 +88,9 @@ def patch_shelf(
     Rename an existing shelf.
     Enforces RBAC: only owner can rename shelf (403 for editors/viewers).
     """
-    return shelf_service.update_shelf(db, current_user.id, shelf_id, shelf_in)
+    shelf = shelf_service.update_shelf(db, current_user.id, shelf_id, shelf_in)
+    await realtime_service.broadcast_shelf_event("shelf_renamed", shelf.id, {"name": shelf.name}, user_id=current_user.id)
+    return shelf
 
 
 @router.put(
@@ -94,7 +98,7 @@ def patch_shelf(
     response_model=ShelfResponse,
     summary="Update a custom shelf",
 )
-def put_shelf(
+async def put_shelf(
     shelf_id: UUID,
     shelf_in: ShelfUpdate,
     current_user: User = Depends(get_current_user),
@@ -104,7 +108,9 @@ def put_shelf(
     Update shelf (PUT semantic compatibility).
     Enforces RBAC: only owner can update shelf (403 for editors/viewers).
     """
-    return shelf_service.update_shelf(db, current_user.id, shelf_id, shelf_in)
+    shelf = shelf_service.update_shelf(db, current_user.id, shelf_id, shelf_in)
+    await realtime_service.broadcast_shelf_event("shelf_renamed", shelf.id, {"name": shelf.name}, user_id=current_user.id)
+    return shelf
 
 
 @router.delete(
@@ -112,7 +118,7 @@ def put_shelf(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a custom shelf",
 )
-def delete_shelf(
+async def delete_shelf(
     shelf_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -123,6 +129,7 @@ def delete_shelf(
     CASCADE constraints safely delete join rows while preserving all actual member books.
     """
     shelf_service.delete_shelf(db, current_user.id, shelf_id)
+    await realtime_service.broadcast_shelf_event("shelf_deleted", shelf_id, {}, user_id=current_user.id)
     return None
 
 
@@ -132,7 +139,7 @@ def delete_shelf(
     status_code=status.HTTP_201_CREATED,
     summary="Add a book to a shelf",
 )
-def add_book_to_shelf(
+async def add_book_to_shelf(
     shelf_id: UUID,
     req: AddBookToShelfRequest,
     current_user: User = Depends(get_current_user),
@@ -144,7 +151,14 @@ def add_book_to_shelf(
     - Enforces book ownership: user can add only their own book (404 if not found).
     - Prevents duplicates (409 Conflict if book is already on shelf).
     """
-    return shelf_service.add_book_to_shelf(db, current_user.id, shelf_id, req.book_id)
+    result = shelf_service.add_book_to_shelf(db, current_user.id, shelf_id, req.book_id)
+    await realtime_service.broadcast_shelf_event(
+        "shelf_book_added",
+        shelf_id,
+        {"book_id": str(req.book_id)},
+        user_id=current_user.id,
+    )
+    return result
 
 
 @router.delete(
@@ -152,7 +166,7 @@ def add_book_to_shelf(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove a book from a shelf",
 )
-def remove_book_from_shelf(
+async def remove_book_from_shelf(
     shelf_id: UUID,
     book_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -164,6 +178,12 @@ def remove_book_from_shelf(
     - The actual book remains in the user's personal library.
     """
     shelf_service.remove_book_from_shelf(db, current_user.id, shelf_id, book_id)
+    await realtime_service.broadcast_shelf_event(
+        "shelf_book_removed",
+        shelf_id,
+        {"book_id": str(book_id)},
+        user_id=current_user.id,
+    )
     return None
 
 
@@ -178,7 +198,7 @@ def remove_book_from_shelf(
     status_code=status.HTTP_201_CREATED,
     summary="Invite a collaborator to a shelf",
 )
-def share_shelf(
+async def share_shelf(
     shelf_id: UUID,
     share_in: ShelfShareCreate,
     current_user: User = Depends(get_current_user),
@@ -191,7 +211,15 @@ def share_shelf(
     - 400 if owner tries to share with self.
     - 409 if already shared with this user.
     """
-    return shelf_service.share_shelf(db, current_user.id, shelf_id, share_in)
+    collab = shelf_service.share_shelf(db, current_user.id, shelf_id, share_in)
+    collab_dict = collab.model_dump(mode="json")
+    await realtime_service.broadcast_shelf_event("shelf_shared", shelf_id, collab_dict)
+    await realtime_service.sio.emit(
+        "shelf_shared",
+        {"shelf_id": str(shelf_id), **collab_dict},
+        room=f"user_{collab.user_id}",
+    )
+    return collab
 
 
 @router.get(
@@ -216,7 +244,7 @@ def list_shelf_shares(
     response_model=CollaboratorResponse,
     summary="Change a collaborator's role",
 )
-def update_shelf_share(
+async def update_shelf_share(
     shelf_id: UUID,
     share_id: UUID,
     share_in: ShelfShareUpdate,
@@ -227,9 +255,17 @@ def update_shelf_share(
     Update a collaborator's role ('editor' <-> 'viewer').
     Enforces RBAC: only owner can modify roles (403 for others).
     """
-    return shelf_service.update_shelf_share(
+    collab = shelf_service.update_shelf_share(
         db, current_user.id, shelf_id, share_id, share_in.role
     )
+    collab_dict = collab.model_dump(mode="json")
+    await realtime_service.broadcast_shelf_event("shelf_role_changed", shelf_id, collab_dict)
+    await realtime_service.sio.emit(
+        "shelf_role_changed",
+        {"shelf_id": str(shelf_id), **collab_dict},
+        room=f"user_{collab.user_id}",
+    )
+    return collab
 
 
 @router.delete(
@@ -237,7 +273,7 @@ def update_shelf_share(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Remove a collaborator or leave a shared shelf",
 )
-def delete_shelf_share(
+async def delete_shelf_share(
     shelf_id: UUID,
     share_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -249,5 +285,12 @@ def delete_shelf_share(
     - Collaborator can remove ONLY their own share (leave shelf).
     - Collaborator cannot remove other collaborators (403).
     """
-    shelf_service.delete_shelf_share(db, current_user.id, shelf_id, share_id)
+    removed_user_id = shelf_service.delete_shelf_share(db, current_user.id, shelf_id, share_id)
+    if removed_user_id:
+        await realtime_service.remove_user_from_shelf_room(removed_user_id, shelf_id)
+    await realtime_service.broadcast_shelf_event(
+        "shelf_share_removed",
+        shelf_id,
+        {"collaborator_id": str(removed_user_id) if removed_user_id else str(share_id)},
+    )
     return None

@@ -15,7 +15,7 @@ from app.schemas.book import (
     ReadingStatsResponse,
     ProgressUpdateResponse,
 )
-from app.services import book_service
+from app.services import book_service, realtime_service
 
 router = APIRouter(prefix="/api/books", tags=["Books"])
 
@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/books", tags=["Books"])
     status_code=status.HTTP_201_CREATED,
     summary="Add a new book to the personal library",
 )
-def create_book(
+async def create_book(
     book_in: BookCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -37,7 +37,14 @@ def create_book(
     - If status is 'finished', automatically populates finished_date and completes current_page if not provided.
     - Ownership is strictly bound to the authenticated user.
     """
-    return book_service.create_book(db, current_user.id, book_in)
+    book = book_service.create_book(db, current_user.id, book_in)
+    book_dict = BookResponse.model_validate(book).model_dump(mode="json")
+    await realtime_service.broadcast_book_event("book_added", book_dict, current_user.id)
+    await realtime_service.broadcast_activity_event(
+        {"action": "book_added", "user_id": str(current_user.id)},
+        [current_user.id],
+    )
+    return book
 
 
 @router.get(
@@ -120,7 +127,7 @@ def get_reading_stats(
     response_model=ProgressUpdateResponse,
     summary="Update reading progress with milestone tracking and auto-transitions",
 )
-def update_book_progress(
+async def update_book_progress(
     book_id: UUID,
     progress_in: BookProgressUpdate,
     current_user: User = Depends(get_current_user),
@@ -135,9 +142,16 @@ def update_book_progress(
     - Computes milestones reached during the current update (quarter, half, three_quarters, completed)
     - Records audit log in activity_logs (at most one record per update)
     """
-    return book_service.update_book_progress(
+    result = book_service.update_book_progress(
         db, current_user.id, book_id, progress_in
     )
+    result_dict = ProgressUpdateResponse.model_validate(result).model_dump(mode="json")
+    await realtime_service.broadcast_progress_event(result_dict, current_user.id)
+    await realtime_service.broadcast_activity_event(
+        {"action": "progress_updated", "user_id": str(current_user.id), "book_id": str(book_id)},
+        [current_user.id],
+    )
+    return result
 
 
 @router.get(
@@ -162,7 +176,7 @@ def get_book(
     response_model=BookResponse,
     summary="Partially update an existing book",
 )
-def patch_book(
+async def patch_book(
     book_id: UUID,
     book_in: BookUpdate,
     current_user: User = Depends(get_current_user),
@@ -173,7 +187,10 @@ def patch_book(
     - Merges incoming fields with existing database values for cross-field boundary validation (current_page <= total_pages).
     - Automatically handles status transition side-effects (finished_date setting/clearing).
     """
-    return book_service.update_book(db, current_user.id, book_id, book_in)
+    book = book_service.update_book(db, current_user.id, book_id, book_in)
+    book_dict = BookResponse.model_validate(book).model_dump(mode="json")
+    await realtime_service.broadcast_book_event("book_updated", book_dict, current_user.id)
+    return book
 
 
 @router.put(
@@ -181,7 +198,7 @@ def patch_book(
     response_model=BookResponse,
     summary="Update an existing book",
 )
-def put_book(
+async def put_book(
     book_id: UUID,
     book_in: BookUpdate,
     current_user: User = Depends(get_current_user),
@@ -191,7 +208,10 @@ def put_book(
     Update a book (provided for full update and PUT semantic compatibility).
     Routes to the same cross-field validated update handler as PATCH.
     """
-    return book_service.update_book(db, current_user.id, book_id, book_in)
+    book = book_service.update_book(db, current_user.id, book_id, book_in)
+    book_dict = BookResponse.model_validate(book).model_dump(mode="json")
+    await realtime_service.broadcast_book_event("book_updated", book_dict, current_user.id)
+    return book
 
 
 @router.delete(
@@ -199,7 +219,7 @@ def put_book(
     status_code=status.HTTP_204_NO_CONTENT,
     summary="Delete a book from personal library",
 )
-def delete_book(
+async def delete_book(
     book_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -209,4 +229,5 @@ def delete_book(
     Enforces user ownership: returns 404 if the book does not belong to the user.
     """
     book_service.delete_book(db, current_user.id, book_id)
+    await realtime_service.broadcast_book_event("book_deleted", {"id": str(book_id)}, current_user.id)
     return None

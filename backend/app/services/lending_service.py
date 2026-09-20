@@ -116,6 +116,8 @@ def lend_book(
             detail="Book is already actively lent to someone else",
         )
 
+    lender = db.query(User).filter(User.id == lender_id).first()
+
     return LendingResponse(
         id=lending.id,
         book_id=book.id,

@@ -11,7 +11,7 @@ from app.schemas.lending import (
     LendBookCreate,
     LendingResponse,
 )
-from app.services import lending_service
+from app.services import lending_service, realtime_service
 
 router = APIRouter(prefix="/api/lending", tags=["Lending"])
 
@@ -84,7 +84,7 @@ def get_book_lending_history(
     status_code=status.HTTP_201_CREATED,
     summary="Lend an owned book to another user by email",
 )
-def lend_book(
+async def lend_book(
     lend_in: LendBookCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -97,7 +97,19 @@ def lend_book(
     - Database-level partial unique index (ix_lending_active_book) enforces single active loan (409 Conflict).
     - Records exactly one ActivityLog entry with action 'book_lent'.
     """
-    return lending_service.lend_book(db, current_user.id, lend_in)
+    lending = lending_service.lend_book(db, current_user.id, lend_in)
+    lending_dict = lending.model_dump(mode="json")
+    await realtime_service.broadcast_lending_event(
+        "book_lent",
+        lending_dict,
+        lending.lender_id,
+        lending.borrower_id,
+    )
+    await realtime_service.broadcast_activity_event(
+        {"action": "book_lent", "user_id": str(current_user.id), "book_id": str(lending.book_id)},
+        [lending.lender_id, lending.borrower_id],
+    )
+    return lending
 
 
 @router.get(
@@ -140,7 +152,7 @@ def list_lendings(
     response_model=LendingResponse,
     summary="Mark an active book loan as returned (Book owner only)",
 )
-def return_book(
+async def return_book(
     lending_id: UUID,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -152,7 +164,19 @@ def return_book(
     - If already returned, returns 400 Bad Request.
     - Records exactly one ActivityLog entry with action 'book_returned'.
     """
-    return lending_service.return_book(db, current_user.id, lending_id)
+    lending = lending_service.return_book(db, current_user.id, lending_id)
+    lending_dict = lending.model_dump(mode="json")
+    await realtime_service.broadcast_lending_event(
+        "book_returned",
+        lending_dict,
+        lending.lender_id,
+        lending.borrower_id,
+    )
+    await realtime_service.broadcast_activity_event(
+        {"action": "book_returned", "user_id": str(current_user.id), "book_id": str(lending.book_id)},
+        [lending.lender_id, lending.borrower_id],
+    )
+    return lending
 
 
 @router.get(

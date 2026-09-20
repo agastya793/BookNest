@@ -16,8 +16,10 @@ BookNest is an application built for managing books, tracking reading milestones
 * **Phase 4 (Custom Shelves & Many-to-Many Book Categorization):** Complete user-owned custom shelves, many-to-many book-to-shelf categorization, cascade safety, duplicate constraint race protection (409 Conflict), empty shelf listings via LEFT OUTER JOIN, dual-ownership shelf filtering, and responsive modular frontend (ShelfSidebar, ShelfModal, AssignShelfModal).
 * **Phase 5 (Shared Shelves & Role-Based Access Control):** Complete collaborative shelf sharing with RBAC (Owner, Editor, Viewer roles), centralized permission resolver, member book ownership isolation, cascade safety, and responsive UI with ShelfShareModal, segregated "My Shelves" / "Shared with me" sidebar, and active shelf permissions.
 * **Phase 6 (Reading Progress Tracker, Page Updates & Statistics):** Complete reading progress tracker with boundary validation, automated status lifecycle transitions (want_to_read -> reading -> finished), milestone tracking (25%, 50%, 75%, 100%), single-occurrence milestone celebration toasts, aggregated reading statistics endpoint (GET /api/books/stats/summary), single ActivityLog audit records, and interactive frontend UI (ProgressModal with scrubber, quick steppers, notes, and ReadingStatsBanner).
+* **Phase 7 (Peer-to-Peer Book Lending & Active Loan Enforcement):** Complete book loan tracking between registered users, database engine invariant via PostgreSQL partial unique index `ix_lending_active_book` (`book_id WHERE is_active = true`), dedicated borrower read-only view (`GET /api/lending/borrowed`), owner-only return action (`POST /api/lending/{id}/return`), and interactive UI with LendBookModal, LendingHistoryModal, and dedicated Lent/Borrowed tabs.
 * **Phase 8 (Activity Feed & Event Audit Logging):** Complete event audit logging across book additions, progress updates, status transitions, shelf sharing, collaborator role changes, share revocations, and peer book lending/returns. Centralized `create_activity_log` helper enforcing atomic single-transaction commit invariants, server-side paginated `/api/activities` endpoint with query scoping (personal isolation, active shelf member visibility, borrower/lender participant access), and interactive frontend UI with `ActivityFeed` component, category filter tabs, server-side pagination, and dashboard integration.
-* **Phase 9+ (Future Implementations):** *Planned* (WebSockets, Real-time Updates, Seed Script, etc.).
+* **Phase 9 (Real-time WebSocket Updates):** Complete bi-directional real-time event broadcasting using `python-socketio` mounted via `socket_app` ASGI wrapper. Short-lived access JWT handshake authentication, room scoping (`user_{user_id}` and `shelf_{shelf_id}`), instantaneous shelf collaborator room revocation, post-commit event emissions across books, shelves, lending, and activity feeds, React `SocketContext` and `useSocket` hooks, live connection status indicator in Navbar, and lightweight refetch synchronization.
+* **Phase 10+ (Future Implementations):** *Planned* (Statistics Dashboard & Analytics Aggregations, Seed Script, Automated Pytest Suite, etc.).
 
 ---
 
@@ -262,12 +264,12 @@ cp backend/.env.example backend/.env
    alembic upgrade head
    ```
 
-7. Start the FastAPI development server:
+7. Start the development server (serving both FastAPI and Socket.IO):
    ```bash
-   uvicorn app.main:app --reload --port 8000
+   uvicorn app.main:socket_app --reload --port 8000
    ```
 
-The backend API will be running at **`http://localhost:8000`**.
+The backend API and WebSocket server will be running at **`http://localhost:8000`**.
 
 ---
 
@@ -390,6 +392,7 @@ FastAPI automatically serves interactive API documentation:
 Run the backend test suites from the `backend/` directory:
 ```bash
 cd backend
+.\venv\Scripts\python test_realtime_phase9.py
 .\venv\Scripts\python test_activity_phase8.py
 .\venv\Scripts\python test_lending_phase7.py
 .\venv\Scripts\python test_progress_phase6.py
@@ -427,7 +430,7 @@ React with Vite was chosen over Next.js for BookNest based on the assessment's a
 | **6** | Reading Progress Tracker & Page Updates | ✅ Completed |
 | **7** | Peer-to-Peer Book Lending & Active Loan Enforcement | ✅ Completed |
 | **8** | Activity Feed & Event Audit Logging | ✅ Completed |
-| **9** | Real-time WebSocket Updates (python-socketio) | ⏳ *Planned* |
+| **9** | Real-time WebSocket Updates (python-socketio) | ✅ Completed |
 | **10** | Statistics Dashboard & Analytics Aggregations | ⏳ *Planned* |
 | **11** | Database Seed Script & Demo Data | ⏳ *Planned* |
 | **12** | Automated Testing Suite (Pytest & Integration Tests) | ⏳ *Planned* |

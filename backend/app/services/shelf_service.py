@@ -662,6 +662,8 @@ def delete_shelf_share(
         shelf_id=shelf.id,
     )
 
+    target_user_id = share.user_id
     db.delete(share)
     db.commit()
+    return target_user_id
 
