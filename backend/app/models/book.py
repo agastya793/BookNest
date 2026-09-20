@@ -57,5 +57,29 @@ class Book(Base):
     def shelf_ids(self) -> list[uuid.UUID]:
         return [sb.shelf_id for sb in self.shelf_books]
 
+    @property
+    def is_lent(self) -> bool:
+        if not self.lendings:
+            return False
+        return any(l.is_active for l in self.lendings)
+
+    @property
+    def active_lending_id(self) -> uuid.UUID | None:
+        if not self.lendings:
+            return None
+        for l in self.lendings:
+            if l.is_active:
+                return l.id
+        return None
+
+    @property
+    def borrower_name(self) -> str | None:
+        if not self.lendings:
+            return None
+        for l in self.lendings:
+            if l.is_active and l.borrower:
+                return l.borrower.name
+        return None
+
     def __repr__(self):
         return f"<Book {self.title} by {self.author}>"

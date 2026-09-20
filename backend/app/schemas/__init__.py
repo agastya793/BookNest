@@ -28,6 +28,12 @@ from app.schemas.shelf import (
     ShelfShareUpdate,
     CollaboratorResponse,
 )
+from app.schemas.lending import (
+    LendBookCreate,
+    LendingResponse,
+    BorrowedBookResponse,
+    LendingSummary,
+)
 
 __all__ = [
     "UserCreate",
@@ -41,6 +47,9 @@ __all__ = [
     "BookResponse",
     "BookStatus",
     "PaginatedBooksResponse",
+    "BookProgressUpdate",
+    "ReadingStatsResponse",
+    "ProgressUpdateResponse",
     "ShelfBase",
     "ShelfCreate",
     "ShelfUpdate",
@@ -51,4 +60,8 @@ __all__ = [
     "ShelfShareCreate",
     "ShelfShareUpdate",
     "CollaboratorResponse",
+    "LendBookCreate",
+    "LendingResponse",
+    "BorrowedBookResponse",
+    "LendingSummary",
 ]

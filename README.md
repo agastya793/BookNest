@@ -16,7 +16,8 @@ BookNest is an application built for managing books, tracking reading milestones
 * **Phase 4 (Custom Shelves & Many-to-Many Book Categorization):** Complete user-owned custom shelves, many-to-many book-to-shelf categorization, cascade safety, duplicate constraint race protection (409 Conflict), empty shelf listings via LEFT OUTER JOIN, dual-ownership shelf filtering, and responsive modular frontend (ShelfSidebar, ShelfModal, AssignShelfModal).
 * **Phase 5 (Shared Shelves & Role-Based Access Control):** Complete collaborative shelf sharing with RBAC (Owner, Editor, Viewer roles), centralized permission resolver, member book ownership isolation, cascade safety, and responsive UI with ShelfShareModal, segregated "My Shelves" / "Shared with me" sidebar, and active shelf permissions.
 * **Phase 6 (Reading Progress Tracker, Page Updates & Statistics):** Complete reading progress tracker with boundary validation, automated status lifecycle transitions (want_to_read -> reading -> finished), milestone tracking (25%, 50%, 75%, 100%), single-occurrence milestone celebration toasts, aggregated reading statistics endpoint (GET /api/books/stats/summary), single ActivityLog audit records, and interactive frontend UI (ProgressModal with scrubber, quick steppers, notes, and ReadingStatsBanner).
-* **Phase 7+ (Feature Implementations):** *Planned* (Lending, WebSockets, Real-time Activity, Seed Script, etc.).
+* **Phase 7 (Peer-to-Peer Book Lending & Active Loan Enforcement):** Complete peer-to-peer book lending between users, PostgreSQL partial unique index active-loan enforcement (`ix_lending_active_book`), defense-in-depth concurrency protection (409 Conflict), borrower read-only access isolation, owner-only return authorization, single ActivityLog audit tracking (`book_lent`, `book_returned`), and responsive UI with LendBookModal, LendingHistoryModal, BookCard lending badges/actions, and dedicated Lent Out / Borrowed views.
+* **Phase 8+ (Feature Implementations):** *Planned* (Activity Feed UI, WebSockets, Real-time Updates, Seed Script, etc.).
 
 ---
 
@@ -372,6 +373,14 @@ FastAPI automatically serves interactive API documentation:
 * **Reading Progress Tracker & Statistics (Phase 6):**
   * `POST /api/books/{id}/progress` — Update reading progress with automated status transitions (`want_to_read` -> `reading` -> `finished`), milestone detection, reflection notes, rating, and activity logging.
   * `GET /api/books/stats/summary` — Retrieve aggregated user reading statistics (total books, status counts, total pages read, completion rate).
+* **Peer-to-Peer Book Lending & Active Loan Enforcement (Phase 7):**
+  * `POST /api/lending` — Lend an owned book to another user by email (owner only; 409 Conflict if actively lent).
+  * `GET /api/lending` — List loans with role (`lender`, `borrower`, `all`) and status (`active`, `returned`, `all`) filters.
+  * `GET /api/lending/borrowed` — List books currently borrowed by authenticated user (read-only views).
+  * `GET /api/lending/borrowed/{book_id}` — Get read-only detail of a book borrowed by authenticated user.
+  * `GET /api/lending/book/{book_id}` — Get complete lending history for an owned book (owner only).
+  * `POST /api/lending/{lending_id}/return` — Mark active loan returned (owner/lender only; 403 Forbidden for others).
+  * `GET /api/lending/{lending_id}` — Get single lending record (lender or borrower only).
 
 ---
 
@@ -379,6 +388,7 @@ FastAPI automatically serves interactive API documentation:
 Run the backend test suites from the `backend/` directory:
 ```bash
 cd backend
+.\venv\Scripts\python test_lending_phase7.py
 .\venv\Scripts\python test_progress_phase6.py
 .\venv\Scripts\python test_shelf_sharing_phase5.py
 .\venv\Scripts\python test_shelves_phase4.py
@@ -412,7 +422,7 @@ React with Vite was chosen over Next.js for BookNest based on the assessment's a
 | **4** | Custom Shelves & Many-to-Many Book Categorization | ✅ Completed |
 | **5** | Shelf Sharing & Role-Based Access Control (Owner / Editor / Viewer) | ✅ Completed |
 | **6** | Reading Progress Tracker & Page Updates | ✅ Completed |
-| **7** | Peer-to-Peer Book Lending & Active Loan Enforcement | ⏳ *Planned* |
+| **7** | Peer-to-Peer Book Lending & Active Loan Enforcement | ✅ Completed |
 | **8** | Activity Feed & Event Audit Logging | ⏳ *Planned* |
 | **9** | Real-time WebSocket Updates (python-socketio) | ⏳ *Planned* |
 | **10** | Statistics Dashboard & Analytics Aggregations | ⏳ *Planned* |

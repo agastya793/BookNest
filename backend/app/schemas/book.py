@@ -89,6 +89,9 @@ class BookResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     shelf_ids: list[UUID] = Field(default_factory=list)
+    is_lent: bool = Field(default=False, description="Whether the book is currently lent out")
+    active_lending_id: Optional[UUID] = Field(default=None, description="Active lending ID if currently lent")
+    borrower_name: Optional[str] = Field(default=None, description="Name of current borrower if actively lent")
 
     # Pydantic v2 ORM mapping from SQLAlchemy Book entity
     model_config = ConfigDict(from_attributes=True)

@@ -13,6 +13,10 @@ export default function BookCard({
   currentShelf = null,
   onRemoveFromShelf = null,
   shelvesMap = {},
+  onLend = null,
+  onReturn = null,
+  onViewLendingHistory = null,
+  isBorrowed = false,
 }) {
   const getStatusBadge = (status) => {
     switch (status) {
@@ -105,6 +109,42 @@ export default function BookCard({
         <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', marginBottom: 'var(--space-sm)' }}>
           by <strong>{book.author}</strong>
         </div>
+
+        {/* Lending Status Badges */}
+        {isBorrowed ? (
+          <div style={{ marginBottom: 'var(--space-sm)' }}>
+            <span
+              className="badge badge-info"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.75rem',
+                padding: '3px 8px',
+              }}
+            >
+              📥 Borrowed from <strong>{book.lender_name || book.lender_email || 'Owner'}</strong>
+            </span>
+          </div>
+        ) : book.is_lent ? (
+          <div style={{ marginBottom: 'var(--space-sm)' }}>
+            <span
+              className="badge badge-warning"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '0.75rem',
+                padding: '3px 8px',
+                background: 'rgba(245, 158, 11, 0.15)',
+                borderColor: 'var(--warning)',
+                color: 'var(--warning)',
+              }}
+            >
+              🤝 Lent to <strong>{book.borrower_name || 'Borrower'}</strong>
+            </span>
+          </div>
+        ) : null}
 
         {/* Shelf Chips / Badges */}
         {assignedShelfNames.length > 0 && (
@@ -234,121 +274,218 @@ export default function BookCard({
           gap: 'var(--space-xs)',
         }}
       >
-        {/* Quick Progress Buttons & Tracker Button */}
-        {(onQuickProgress || onUpdateProgress) && (
-          <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
-            {onUpdateProgress && (
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => onUpdateProgress(book)}
-                style={{
-                  flex: 1.2,
-                  padding: '5px 8px',
-                  fontSize: 'var(--font-size-xs)',
-                  color: 'var(--accent)',
-                  borderColor: 'rgba(147, 51, 234, 0.4)',
-                  fontWeight: 600,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '4px',
-                }}
-                title="Update reading progress, pages, rating and notes"
-              >
-                <span>📈</span> Progress
-              </button>
-            )}
-            {onQuickProgress && book.status !== 'finished' && (
-              <>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={handleAdvance10}
-                  style={{ flex: 1, padding: '5px 8px', fontSize: 'var(--font-size-xs)' }}
-                  title="Add 10 pages to progress"
-                >
-                  +10
-                </button>
-                <button
-                  type="button"
-                  className="btn-secondary"
-                  onClick={handleMarkFinished}
-                  style={{ flex: 1, padding: '5px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--success)' }}
-                  title="Mark book as finished"
-                >
-                  ✓ Finish
-                </button>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Contextual "Remove from Shelf" Button when viewing an active shelf */}
-        {currentShelf && onRemoveFromShelf && currentShelf.role !== 'viewer' && (
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => onRemoveFromShelf(currentShelf.id, book.id, book.title, currentShelf.name)}
+        {isBorrowed ? (
+          /* Borrowed Book: Strictly Read-Only View (No owner controls) */
+          <div
             style={{
-              padding: '5px 10px',
-              fontSize: 'var(--font-size-xs)',
-              color: 'var(--warning)',
-              borderColor: 'rgba(245, 158, 11, 0.3)',
-              marginBottom: 'var(--space-xs)',
+              display: 'flex',
               justifyContent: 'center',
+              alignItems: 'center',
+              padding: '8px',
+              background: 'var(--bg-dark)',
+              borderRadius: 'var(--radius-sm)',
+              color: 'var(--text-muted)',
+              fontSize: 'var(--font-size-xs)',
+              fontStyle: 'italic',
             }}
-            title={`Remove "${book.title}" from "${currentShelf.name}" (keeps book in library)`}
           >
-            ✕ Remove from "{currentShelf.name}"
-          </button>
-        )}
+            🔒 Read-only borrowed copy • Owner retains catalog controls
+          </div>
+        ) : (
+          /* Owned Book: Full Owner Controls */
+          <>
+            {/* Quick Progress Buttons & Tracker Button */}
+            {(onQuickProgress || onUpdateProgress) && (
+              <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
+                {onUpdateProgress && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => onUpdateProgress(book)}
+                    style={{
+                      flex: 1.2,
+                      padding: '5px 8px',
+                      fontSize: 'var(--font-size-xs)',
+                      color: 'var(--accent)',
+                      borderColor: 'rgba(147, 51, 234, 0.4)',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                    }}
+                    title="Update reading progress, pages, rating and notes"
+                  >
+                    <span>📈</span> Progress
+                  </button>
+                )}
+                {onQuickProgress && book.status !== 'finished' && (
+                  <>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={handleAdvance10}
+                      style={{ flex: 1, padding: '5px 8px', fontSize: 'var(--font-size-xs)' }}
+                      title="Add 10 pages to progress"
+                    >
+                      +10
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={handleMarkFinished}
+                      style={{ flex: 1, padding: '5px 8px', fontSize: 'var(--font-size-xs)', color: 'var(--success)' }}
+                      title="Mark book as finished"
+                    >
+                      ✓ Finish
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
 
-        {/* Manage Shelves, Edit, and Delete Actions */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-xs)' }}>
-          {/* Manage Shelves Button */}
-          {onManageShelves ? (
-            <button
-              type="button"
-              className="btn-secondary"
-              onClick={() => onManageShelves(book)}
-              style={{
-                padding: '4px 8px',
-                fontSize: 'var(--font-size-xs)',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-              title="Assign book to custom shelves"
-            >
-              <span>📁</span> Shelves
-            </button>
-          ) : <div />}
+            {/* Peer Lending Actions Row */}
+            <div style={{ display: 'flex', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
+              {book.is_lent ? (
+                <>
+                  {onReturn && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => onReturn(book)}
+                      style={{
+                        flex: 1,
+                        padding: '5px 8px',
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--warning)',
+                        borderColor: 'rgba(245, 158, 11, 0.4)',
+                        fontWeight: 600,
+                      }}
+                      title="Mark this lent book as returned"
+                    >
+                      ↩ Mark Returned
+                    </button>
+                  )}
+                  {onViewLendingHistory && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => onViewLendingHistory(book)}
+                      style={{
+                        padding: '5px 8px',
+                        fontSize: 'var(--font-size-xs)',
+                      }}
+                      title="View loan history"
+                    >
+                      📜 History
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {onLend && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => onLend(book)}
+                      style={{
+                        flex: 1,
+                        padding: '5px 8px',
+                        fontSize: 'var(--font-size-xs)',
+                        color: 'var(--accent)',
+                        borderColor: 'rgba(139, 92, 246, 0.4)',
+                        fontWeight: 600,
+                      }}
+                      title="Lend this book to a friend"
+                    >
+                      🤝 Lend Book
+                    </button>
+                  )}
+                  {onViewLendingHistory && (
+                    <button
+                      type="button"
+                      className="btn-secondary"
+                      onClick={() => onViewLendingHistory(book)}
+                      style={{
+                        padding: '5px 8px',
+                        fontSize: 'var(--font-size-xs)',
+                      }}
+                      title="View loan history"
+                    >
+                      📜 History
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
 
-          {/* Edit and Delete Buttons */}
-          <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
-            {onEdit && (
+            {/* Contextual "Remove from Shelf" Button when viewing an active shelf */}
+            {currentShelf && onRemoveFromShelf && currentShelf.role !== 'viewer' && (
               <button
                 type="button"
                 className="btn-secondary"
-                onClick={() => onEdit(book)}
-                style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+                onClick={() => onRemoveFromShelf(currentShelf.id, book.id, book.title, currentShelf.name)}
+                style={{
+                  padding: '5px 10px',
+                  fontSize: 'var(--font-size-xs)',
+                  color: 'var(--warning)',
+                  borderColor: 'rgba(245, 158, 11, 0.3)',
+                  marginBottom: 'var(--space-xs)',
+                  justifyContent: 'center',
+                }}
+                title={`Remove "${book.title}" from "${currentShelf.name}" (keeps book in library)`}
               >
-                Edit
+                ✕ Remove from "{currentShelf.name}"
               </button>
             )}
-            {onDelete && (
-              <button
-                type="button"
-                className="btn-danger"
-                onClick={() => onDelete(book.id, book.title)}
-                style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
-              >
-                Delete
-              </button>
-            )}
-          </div>
-        </div>
+
+            {/* Manage Shelves, Edit, and Delete Actions */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 'var(--space-xs)' }}>
+              {/* Manage Shelves Button */}
+              {onManageShelves ? (
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => onManageShelves(book)}
+                  style={{
+                    padding: '4px 8px',
+                    fontSize: 'var(--font-size-xs)',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                  title="Assign book to custom shelves"
+                >
+                  <span>📁</span> Shelves
+                </button>
+              ) : <div />}
+
+              {/* Edit and Delete Buttons */}
+              <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                {onEdit && (
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => onEdit(book)}
+                    style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+                  >
+                    Edit
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    className="btn-danger"
+                    onClick={() => onDelete(book.id, book.title)}
+                    style={{ padding: '4px 10px', fontSize: 'var(--font-size-xs)' }}
+                  >
+                    Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

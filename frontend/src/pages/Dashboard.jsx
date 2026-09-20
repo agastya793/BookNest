@@ -9,6 +9,8 @@ import AssignShelfModal from '../components/AssignShelfModal'
 import ShelfShareModal from '../components/ShelfShareModal'
 import ReadingStatsBanner from '../components/ReadingStatsBanner'
 import ProgressModal from '../components/ProgressModal'
+import LendBookModal from '../components/LendBookModal'
+import LendingHistoryModal from '../components/LendingHistoryModal'
 import {
   getBooksApi,
   createBookApi,
@@ -25,6 +27,11 @@ import {
   addBookToShelfApi,
   removeBookFromShelfApi,
 } from '../api/shelves'
+import {
+  getLendingsApi,
+  getBorrowedBooksApi,
+  returnBookApi,
+} from '../api/lending'
 import { getMeApi } from '../api/auth'
 import { getAccessToken } from '../api/client'
 
@@ -78,6 +85,13 @@ export default function Dashboard() {
 
   // Milestone Celebration Toast State (Phase 6)
   const [milestoneToast, setMilestoneToast] = useState(null)
+
+  // Lending State (Phase 7)
+  const [activeView, setActiveView] = useState('catalog') // 'catalog' | 'lent_out' | 'borrowed'
+  const [lentBooks, setLentBooks] = useState([])
+  const [borrowedBooks, setBorrowedBooks] = useState([])
+  const [lendModalBook, setLendModalBook] = useState(null)
+  const [historyModalBook, setHistoryModalBook] = useState(null)
 
   // Collapsible Architecture Diagnostics
   const [showDiagnostics, setShowDiagnostics] = useState(false)
@@ -168,6 +182,36 @@ export default function Dashboard() {
     }
   }, [])
 
+  // Fetch active lending records (Phase 7)
+  const fetchLendingData = useCallback(async () => {
+    try {
+      const [lentRes, borrowedRes] = await Promise.all([
+        getLendingsApi({ role: 'lender', status: 'active' }),
+        getBorrowedBooksApi(),
+      ])
+      setLentBooks(lentRes || [])
+      setBorrowedBooks(borrowedRes || [])
+    } catch (err) {
+      console.error('Failed to load lending data:', err)
+    }
+  }, [])
+
+  const handleReturnBook = async (lendingId) => {
+    if (!lendingId) return
+    try {
+      await returnBookApi(lendingId)
+      await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats()])
+    } catch (err) {
+      console.error('Failed to return book:', err)
+      alert(err.response?.data?.detail || 'Failed to return book.')
+    }
+  }
+
+  const handleLendSuccess = async () => {
+    await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats()])
+    setLendModalBook(null)
+  }
+
   // Auto-dismiss milestone notification toast after 4.5 seconds
   useEffect(() => {
     if (milestoneToast) {
@@ -183,7 +227,8 @@ export default function Dashboard() {
     fetchShelves()
     fetchTotalCatalogCount()
     fetchReadingStats()
-  }, [fetchShelves, fetchTotalCatalogCount, fetchReadingStats])
+    fetchLendingData()
+  }, [fetchShelves, fetchTotalCatalogCount, fetchReadingStats, fetchLendingData])
 
   useEffect(() => {
     fetchBooks()
@@ -535,6 +580,7 @@ export default function Dashboard() {
             selectedShelfId={selectedShelfId}
             onSelectShelf={(id) => {
               setSelectedShelfId(id)
+              setActiveView('catalog')
               setPage(1)
             }}
             onOpenCreateShelf={handleOpenCreateShelf}
@@ -542,73 +588,258 @@ export default function Dashboard() {
             onDeleteShelf={handleDeleteShelf}
             onOpenShareShelf={handleOpenShareShelf}
             loading={shelvesLoading}
+            activeView={activeView}
+            onSelectView={(v) => {
+              setActiveView(v)
+              if (v !== 'catalog') {
+                setSelectedShelfId(null)
+              }
+            }}
+            activeLentCount={lentBooks.length}
+            activeBorrowedCount={borrowedBooks.length}
           />
 
           {/* Right Column: Books Catalog & Toolbar */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)', minWidth: 0 }}>
-            {/* Active Shelf Filter Banner */}
-            {activeShelf && (
-              <div
-                className="card"
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  background: 'linear-gradient(90deg, rgba(139, 92, 246, 0.15) 0%, rgba(34, 37, 54, 0.8) 100%)',
-                  borderColor: 'var(--accent)',
-                  padding: 'var(--space-md) var(--space-lg)',
-                }}
-              >
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: '1.25rem' }}>{activeShelf.role && activeShelf.role !== 'owner' ? '🤝' : '📁'}</span>
-                    <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700 }}>
-                      Shelf: {activeShelf.name}
-                    </h3>
-                    <span className="badge badge-accent">
-                      {total} {total === 1 ? 'Book' : 'Books'}
-                    </span>
-                    <span
-                      className={`badge ${activeShelf.role === 'editor' ? 'badge-accent' : activeShelf.role === 'viewer' ? 'badge-info' : 'badge-accent'}`}
-                      style={{ textTransform: 'capitalize' }}
-                    >
-                      {activeShelf.role || 'Owner'}
-                    </span>
-                    {activeShelf.role && activeShelf.role !== 'owner' && (
-                      <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
-                        Shared by <strong>{activeShelf.owner_name || activeShelf.owner_email || 'Owner'}</strong>
+            {activeView === 'lent_out' ? (
+              /* Dedicated Lent Out View (Phase 7) */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                <div
+                  className="card"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: 'linear-gradient(90deg, rgba(245, 158, 11, 0.15) 0%, rgba(34, 37, 54, 0.8) 100%)',
+                    borderColor: 'var(--warning)',
+                    padding: 'var(--space-md) var(--space-lg)',
+                  }}
+                >
+                  <div>
+                    <h2 style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📤</span> Books I've Lent Out
+                      <span className="badge badge-warning" style={{ fontSize: '0.75rem' }}>
+                        {lentBooks.length} Active
                       </span>
-                    )}
+                    </h2>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '4px' }}>
+                      Active peer loans where you retain ownership. When the borrower returns your physical book, mark it as returned.
+                    </p>
                   </div>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '4px' }}>
-                    {activeShelf.role === 'viewer'
-                      ? 'Read-only view. You can browse books on this shelf.'
-                      : 'Filtered view. Removing a book from this shelf or deleting this shelf preserves library books.'}
-                  </p>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
                   <button
                     type="button"
                     className="btn-secondary"
-                    onClick={() => handleOpenShareShelf(activeShelf)}
-                    style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
+                    onClick={() => setActiveView('catalog')}
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '6px 14px' }}
                   >
-                    {activeShelf.role === 'owner' || !activeShelf.role ? '👥 Manage Collaborators' : '👥 Collaborators / Leave'}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-secondary"
-                    onClick={() => {
-                      setSelectedShelfId(null)
-                      setPage(1)
-                    }}
-                    style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
-                  >
-                    ✕ View All Books
+                    ← Back to Library
                   </button>
                 </div>
+
+                {lentBooks.length === 0 ? (
+                  <div className="card" style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-sm)' }}>🤝</div>
+                    <h3 style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', marginBottom: 'var(--space-xs)' }}>
+                      No Books Currently Lent Out
+                    </h3>
+                    <p style={{ fontSize: 'var(--font-size-sm)', maxWidth: '420px', margin: '0 auto var(--space-md) auto' }}>
+                      You haven't lent any books to other readers yet. To lend a book, find it in your library and click "Lend Book".
+                    </p>
+                    <button className="btn-primary" onClick={() => setActiveView('catalog')}>
+                      Browse Library Books
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 'var(--space-lg)' }}>
+                    {lentBooks.map((lending) => (
+                      <div
+                        key={lending.id}
+                        className="card"
+                        style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: 'var(--space-md)',
+                          borderColor: 'rgba(245, 158, 11, 0.3)',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 'var(--space-xs)', marginBottom: 'var(--space-xs)' }}>
+                            <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 600 }}>
+                              {lending.book_title}
+                            </h3>
+                            <span className="badge badge-warning" style={{ fontSize: '0.7rem' }}>
+                              Active Loan
+                            </span>
+                          </div>
+                          <div style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)', marginBottom: 'var(--space-md)' }}>
+                            by <strong>{lending.book_author}</strong>
+                          </div>
+                          <div style={{ padding: 'var(--space-sm) var(--space-md)', background: 'var(--bg-dark)', borderRadius: 'var(--radius-md)', fontSize: 'var(--font-size-xs)' }}>
+                            <div style={{ marginBottom: '4px' }}>
+                              Borrower: <strong>{lending.borrower_name}</strong> ({lending.borrower_email})
+                            </div>
+                            <div style={{ color: 'var(--text-muted)' }}>
+                              Lent on: {new Date(lending.lent_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-sm)', display: 'flex', justifyContent: 'flex-end', gap: 'var(--space-xs)' }}>
+                          <button
+                            type="button"
+                            className="btn-primary"
+                            onClick={() => handleReturnBook(lending.id)}
+                            style={{
+                              padding: '6px 14px',
+                              fontSize: 'var(--font-size-xs)',
+                              background: 'var(--warning)',
+                              borderColor: 'var(--warning)',
+                              color: '#000',
+                              fontWeight: 600,
+                            }}
+                          >
+                            ↩ Mark Returned
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+            ) : activeView === 'borrowed' ? (
+              /* Dedicated Borrowed Books View (Phase 7) */
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-md)' }}>
+                <div
+                  className="card"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    background: 'linear-gradient(90deg, rgba(59, 130, 246, 0.15) 0%, rgba(34, 37, 54, 0.8) 100%)',
+                    borderColor: 'var(--info)',
+                    padding: 'var(--space-md) var(--space-lg)',
+                  }}
+                >
+                  <div>
+                    <h2 style={{ fontSize: 'var(--font-size-xl)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span>📥</span> Books I've Borrowed
+                      <span className="badge badge-info" style={{ fontSize: '0.75rem' }}>
+                        {borrowedBooks.length} Active
+                      </span>
+                    </h2>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '4px' }}>
+                      Books shared with you by other readers. You have read-only access while the loan is active.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setActiveView('catalog')}
+                    style={{ fontSize: 'var(--font-size-xs)', padding: '6px 14px' }}
+                  >
+                    ← Back to Library
+                  </button>
+                </div>
+
+                {borrowedBooks.length === 0 ? (
+                  <div className="card" style={{ textAlign: 'center', padding: 'var(--space-2xl)', color: 'var(--text-secondary)' }}>
+                    <div style={{ fontSize: '2.5rem', marginBottom: 'var(--space-sm)' }}>📖</div>
+                    <h3 style={{ fontSize: 'var(--font-size-lg)', color: 'var(--text-primary)', marginBottom: 'var(--space-xs)' }}>
+                      No Borrowed Books
+                    </h3>
+                    <p style={{ fontSize: 'var(--font-size-sm)', maxWidth: '420px', margin: '0 auto var(--space-md) auto' }}>
+                      You haven't borrowed any books from other readers. When someone lends you a book with your registered email, it will appear here.
+                    </p>
+                    <button className="btn-secondary" onClick={() => setActiveView('catalog')}>
+                      View My Library
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 'var(--space-lg)' }}>
+                    {borrowedBooks.map((borrowed) => (
+                      <BookCard
+                        key={borrowed.lending_id}
+                        book={{
+                          id: borrowed.book_id,
+                          title: borrowed.title,
+                          author: borrowed.author,
+                          total_pages: borrowed.total_pages,
+                          status: 'reading',
+                          lender_name: borrowed.lender_name,
+                          lender_email: borrowed.lender_email,
+                        }}
+                        isBorrowed={true}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Standard Books Catalog View */
+              <>
+                {/* Active Shelf Filter Banner */}
+                {activeShelf && (
+                  <div
+                    className="card"
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      background: 'linear-gradient(90deg, rgba(139, 92, 246, 0.15) 0%, rgba(34, 37, 54, 0.8) 100%)',
+                      borderColor: 'var(--accent)',
+                      padding: 'var(--space-md) var(--space-lg)',
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '1.25rem' }}>{activeShelf.role && activeShelf.role !== 'owner' ? '🤝' : '📁'}</span>
+                        <h3 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 700 }}>
+                          Shelf: {activeShelf.name}
+                        </h3>
+                        <span className="badge badge-accent">
+                          {total} {total === 1 ? 'Book' : 'Books'}
+                        </span>
+                        <span
+                          className={`badge ${activeShelf.role === 'editor' ? 'badge-accent' : activeShelf.role === 'viewer' ? 'badge-info' : 'badge-accent'}`}
+                          style={{ textTransform: 'capitalize' }}
+                        >
+                          {activeShelf.role || 'Owner'}
+                        </span>
+                        {activeShelf.role && activeShelf.role !== 'owner' && (
+                          <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
+                            Shared by <strong>{activeShelf.owner_name || activeShelf.owner_email || 'Owner'}</strong>
+                          </span>
+                        )}
+                      </div>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-xs)', marginTop: '4px' }}>
+                        {activeShelf.role === 'viewer'
+                          ? 'Read-only view. You can browse books on this shelf.'
+                          : 'Filtered view. Removing a book from this shelf or deleting this shelf preserves library books.'}
+                      </p>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)' }}>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => handleOpenShareShelf(activeShelf)}
+                        style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
+                      >
+                        {activeShelf.role === 'owner' || !activeShelf.role ? '👥 Manage Collaborators' : '👥 Collaborators / Leave'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        onClick={() => {
+                          setSelectedShelfId(null)
+                          setPage(1)
+                        }}
+                        style={{ fontSize: 'var(--font-size-xs)', padding: '6px 12px' }}
+                      >
+                        ✕ View All Books
+                      </button>
+                    </div>
+                  </div>
+                )}
 
             {/* Library Controls Toolbar */}
             <div
@@ -809,6 +1040,9 @@ export default function Dashboard() {
                         currentShelf={activeShelf}
                         onRemoveFromShelf={activeShelf?.role !== 'viewer' ? handleRemoveFromShelf : null}
                         shelvesMap={shelvesMap}
+                        onLend={isBookOwner ? (b) => setLendModalBook(b) : null}
+                        onReturn={isBookOwner ? (b) => handleReturnBook(b.active_lending_id) : null}
+                        onViewLendingHistory={isBookOwner ? (b) => setHistoryModalBook(b) : null}
                       />
                     )
                   })}
@@ -886,7 +1120,9 @@ export default function Dashboard() {
                 )}
               </>
             )}
-          </div>
+          </>
+        )}
+      </div>
         </div>
 
         {/* Collapsible Architecture Diagnostics Panel */}
@@ -1052,6 +1288,21 @@ export default function Dashboard() {
         onClose={handleCloseProgressModal}
         onSaveProgress={handleSaveProgress}
         book={progressModalState.book}
+      />
+
+      {/* Lend Book Modal (Phase 7) */}
+      <LendBookModal
+        isOpen={!!lendModalBook}
+        onClose={() => setLendModalBook(null)}
+        book={lendModalBook}
+        onLendSuccess={handleLendSuccess}
+      />
+
+      {/* Lending History Modal (Phase 7) */}
+      <LendingHistoryModal
+        isOpen={!!historyModalBook}
+        onClose={() => setHistoryModalBook(null)}
+        book={historyModalBook}
       />
 
       {/* Milestone Celebration Toast (Phase 6) */}

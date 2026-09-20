@@ -15,6 +15,10 @@ export default function ShelfSidebar({
   onDeleteShelf,
   onOpenShareShelf,
   loading = false,
+  activeView = 'catalog',
+  onSelectView = () => {},
+  activeLentCount = 0,
+  activeBorrowedCount = 0,
 }) {
   const myShelves = shelves.filter((s) => s.role === 'owner' || !s.role)
   const sharedShelves = shelves.filter((s) => s.role && s.role !== 'owner')
@@ -241,17 +245,20 @@ export default function ShelfSidebar({
         {/* All Books Default View */}
         <button
           type="button"
-          onClick={() => onSelectShelf(null)}
+          onClick={() => {
+            onSelectView('catalog')
+            onSelectShelf(null)
+          }}
           style={{
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             padding: '10px 12px',
             borderRadius: 'var(--radius-md)',
-            background: selectedShelfId === null ? 'var(--accent-light)' : 'transparent',
-            color: selectedShelfId === null ? 'var(--text-primary)' : 'var(--text-secondary)',
-            border: selectedShelfId === null ? '1px solid var(--accent)' : '1px solid transparent',
-            fontWeight: selectedShelfId === null ? 600 : 500,
+            background: activeView === 'catalog' && selectedShelfId === null ? 'var(--accent-light)' : 'transparent',
+            color: activeView === 'catalog' && selectedShelfId === null ? 'var(--text-primary)' : 'var(--text-secondary)',
+            border: activeView === 'catalog' && selectedShelfId === null ? '1px solid var(--accent)' : '1px solid transparent',
+            fontWeight: activeView === 'catalog' && selectedShelfId === null ? 600 : 500,
             textAlign: 'left',
             width: '100%',
             transition: 'all var(--transition-fast)',
@@ -265,11 +272,10 @@ export default function ShelfSidebar({
           <span
             className="badge"
             style={{
-              background: selectedShelfId === null ? 'var(--accent)' : 'var(--bg-primary)',
-              color: selectedShelfId === null ? '#ffffff' : 'var(--text-muted)',
+              background: activeView === 'catalog' && selectedShelfId === null ? 'var(--accent)' : 'var(--bg-primary)',
+              color: activeView === 'catalog' && selectedShelfId === null ? '#ffffff' : 'var(--text-muted)',
               fontSize: 'var(--font-size-xs)',
               fontWeight: 600,
-              padding: '2px 8px',
             }}
           >
             {totalBooksCount}
@@ -333,6 +339,86 @@ export default function ShelfSidebar({
             {sharedShelves.map((shelf) => renderShelfRow(shelf, true))}
           </div>
         )}
+
+        {/* Peer Lending Section */}
+        <div style={{ margin: 'var(--space-xs) 0 4px 0', borderTop: '1px solid var(--border)', paddingTop: '6px' }}>
+          <div
+            style={{
+              fontSize: '0.7rem',
+              fontWeight: 700,
+              color: 'var(--accent)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px',
+              padding: '0 8px 4px 8px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
+            }}
+          >
+            <span>🤝</span> Peer Lending
+          </div>
+
+          {/* Lent Out Button */}
+          <button
+            type="button"
+            onClick={() => onSelectView('lent_out')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-md)',
+              background: activeView === 'lent_out' ? 'var(--accent-light)' : 'transparent',
+              color: activeView === 'lent_out' ? 'var(--text-primary)' : 'var(--text-secondary)',
+              border: activeView === 'lent_out' ? '1px solid var(--accent)' : '1px solid transparent',
+              fontWeight: activeView === 'lent_out' ? 600 : 500,
+              width: '100%',
+              cursor: 'pointer',
+              marginBottom: '2px',
+              transition: 'all var(--transition-fast)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <span style={{ fontSize: '0.95rem' }}>📤</span>
+              <span style={{ fontSize: 'var(--font-size-sm)' }}>Lent Out</span>
+            </div>
+            {activeLentCount > 0 && (
+              <span className="badge badge-warning" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>
+                {activeLentCount}
+              </span>
+            )}
+          </button>
+
+          {/* Borrowed Button */}
+          <button
+            type="button"
+            onClick={() => onSelectView('borrowed')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '8px 10px',
+              borderRadius: 'var(--radius-md)',
+              background: activeView === 'borrowed' ? 'var(--accent-light)' : 'transparent',
+              color: activeView === 'borrowed' ? 'var(--text-primary)' : 'var(--text-secondary)',
+              border: activeView === 'borrowed' ? '1px solid var(--accent)' : '1px solid transparent',
+              fontWeight: activeView === 'borrowed' ? 600 : 500,
+              width: '100%',
+              cursor: 'pointer',
+              transition: 'all var(--transition-fast)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
+              <span style={{ fontSize: '0.95rem' }}>📥</span>
+              <span style={{ fontSize: 'var(--font-size-sm)' }}>Borrowed</span>
+            </div>
+            {activeBorrowedCount > 0 && (
+              <span className="badge badge-info" style={{ fontSize: '0.7rem', padding: '1px 6px' }}>
+                {activeBorrowedCount}
+              </span>
+            )}
+          </button>
+        </div>
       </nav>
     </aside>
   )

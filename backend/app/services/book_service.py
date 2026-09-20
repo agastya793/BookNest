@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.models.activity_log import ActivityLog
 from app.models.book import Book
+from app.models.lending import Lending
 from app.models.shelf import Shelf
 from app.models.shelf_book import ShelfBook
 from app.schemas.book import BookCreate, BookUpdate, BookProgressUpdate
@@ -51,7 +52,10 @@ def get_book(db: Session, user_id: UUID, book_id: UUID) -> Book:
     """
     book = (
         db.query(Book)
-        .options(selectinload(Book.shelf_books))
+        .options(
+            selectinload(Book.shelf_books),
+            selectinload(Book.lendings).selectinload(Lending.borrower),
+        )
         .filter(Book.id == book_id, Book.user_id == user_id)
         .first()
     )
@@ -124,7 +128,10 @@ def list_books(
     # Database-level pagination via OFFSET and LIMIT
     offset = (page - 1) * page_size
     items = (
-        query.options(selectinload(Book.shelf_books))
+        query.options(
+            selectinload(Book.shelf_books),
+            selectinload(Book.lendings).selectinload(Lending.borrower),
+        )
         .offset(offset)
         .limit(page_size)
         .all()
