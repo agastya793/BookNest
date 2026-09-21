@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
-from app.routers import auth, books, shelves, lending, activity
+from app.routers import auth, books, shelves, lending, activity, dashboard
 
 app = FastAPI(title="BookNest API", version="1.0.0")
 
@@ -20,6 +20,7 @@ app.include_router(books.router)
 app.include_router(shelves.router)
 app.include_router(lending.router)
 app.include_router(activity.router)
+app.include_router(dashboard.router)
 
 
 

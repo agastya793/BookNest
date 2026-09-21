@@ -9,6 +9,7 @@ import ShelfModal from '../components/ShelfModal'
 import AssignShelfModal from '../components/AssignShelfModal'
 import ShelfShareModal from '../components/ShelfShareModal'
 import ReadingStatsBanner from '../components/ReadingStatsBanner'
+import DashboardSummary from '../components/DashboardSummary'
 import ProgressModal from '../components/ProgressModal'
 import LendBookModal from '../components/LendBookModal'
 import LendingHistoryModal from '../components/LendingHistoryModal'
@@ -34,6 +35,7 @@ import {
   getBorrowedBooksApi,
   returnBookApi,
 } from '../api/lending'
+import { getDashboardSummaryApi } from '../api/dashboard'
 import { getMeApi } from '../api/auth'
 import { getAccessToken } from '../api/client'
 
@@ -78,6 +80,11 @@ export default function Dashboard() {
   const [readingStats, setReadingStats] = useState(null)
   const [readingStatsLoading, setReadingStatsLoading] = useState(false)
   const [readingStatsError, setReadingStatsError] = useState(null)
+
+  // Dedicated Dashboard Summary State (Step 2 - Requirement #32)
+  const [dashboardSummary, setDashboardSummary] = useState(null)
+  const [dashboardSummaryLoading, setDashboardSummaryLoading] = useState(false)
+  const [dashboardSummaryError, setDashboardSummaryError] = useState(null)
 
   // Progress Modal State (Phase 6)
   const [progressModalState, setProgressModalState] = useState({
@@ -192,6 +199,21 @@ export default function Dashboard() {
     }
   }, [])
 
+  // Fetch dedicated dashboard summary from /api/dashboard/summary (Step 2 - Requirement #32)
+  const fetchDashboardSummary = useCallback(async () => {
+    setDashboardSummaryLoading(true)
+    setDashboardSummaryError(null)
+    try {
+      const res = await getDashboardSummaryApi()
+      setDashboardSummary(res.data)
+    } catch (err) {
+      console.error('Failed to load dashboard summary:', err)
+      setDashboardSummaryError('Failed to load dashboard summary.')
+    } finally {
+      setDashboardSummaryLoading(false)
+    }
+  }, [])
+
   // Fetch active lending records (Phase 7)
   const fetchLendingData = useCallback(async () => {
     try {
@@ -210,7 +232,7 @@ export default function Dashboard() {
     if (!lendingId) return
     try {
       await returnBookApi(lendingId)
-      await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats()])
+      await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats(), fetchDashboardSummary()])
       triggerActivityRefresh()
     } catch (err) {
       console.error('Failed to return book:', err)
@@ -219,7 +241,7 @@ export default function Dashboard() {
   }
 
   const handleLendSuccess = async () => {
-    await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats()])
+    await Promise.all([fetchLendingData(), fetchBooks(), fetchReadingStats(), fetchDashboardSummary()])
     triggerActivityRefresh()
     setLendModalBook(null)
   }
@@ -239,8 +261,9 @@ export default function Dashboard() {
     fetchShelves()
     fetchTotalCatalogCount()
     fetchReadingStats()
+    fetchDashboardSummary()
     fetchLendingData()
-  }, [fetchShelves, fetchTotalCatalogCount, fetchReadingStats, fetchLendingData])
+  }, [fetchShelves, fetchTotalCatalogCount, fetchReadingStats, fetchDashboardSummary, fetchLendingData])
 
   useEffect(() => {
     fetchBooks()
@@ -258,35 +281,41 @@ export default function Dashboard() {
   useSocket('book_added', useCallback(() => {
     fetchBooks()
     fetchReadingStats()
+    fetchDashboardSummary()
     triggerActivityRefresh()
-  }, [fetchBooks, fetchReadingStats, triggerActivityRefresh]))
+  }, [fetchBooks, fetchReadingStats, fetchDashboardSummary, triggerActivityRefresh]))
 
   useSocket('book_updated', useCallback(() => {
     fetchBooks()
     fetchReadingStats()
-  }, [fetchBooks, fetchReadingStats]))
+    fetchDashboardSummary()
+  }, [fetchBooks, fetchReadingStats, fetchDashboardSummary]))
 
   useSocket('book_deleted', useCallback(() => {
     fetchBooks()
     fetchReadingStats()
+    fetchDashboardSummary()
     fetchShelves()
-  }, [fetchBooks, fetchReadingStats, fetchShelves]))
+  }, [fetchBooks, fetchReadingStats, fetchDashboardSummary, fetchShelves]))
 
   // 2. Live Reading Progress & Milestones
   useSocket('progress_updated', useCallback(() => {
     fetchBooks()
     fetchReadingStats()
+    fetchDashboardSummary()
     triggerActivityRefresh()
-  }, [fetchBooks, fetchReadingStats, triggerActivityRefresh]))
+  }, [fetchBooks, fetchReadingStats, fetchDashboardSummary, triggerActivityRefresh]))
 
   // 3. Live Shelf Collaboration Events
   useSocket('shelf_created', useCallback(() => {
     fetchShelves()
-  }, [fetchShelves]))
+    fetchDashboardSummary()
+  }, [fetchShelves, fetchDashboardSummary]))
 
   useSocket('shelf_renamed', useCallback(() => {
     fetchShelves()
-  }, [fetchShelves]))
+    fetchDashboardSummary()
+  }, [fetchShelves, fetchDashboardSummary]))
 
   useSocket('shelf_deleted', useCallback((data) => {
     if (selectedShelfId === data?.shelf_id) {
@@ -294,22 +323,26 @@ export default function Dashboard() {
     }
     fetchShelves()
     fetchBooks()
-  }, [selectedShelfId, fetchShelves, fetchBooks]))
+    fetchDashboardSummary()
+  }, [selectedShelfId, fetchShelves, fetchBooks, fetchDashboardSummary]))
 
   useSocket('shelf_book_added', useCallback(() => {
     fetchShelves()
     fetchBooks()
-  }, [fetchShelves, fetchBooks]))
+    fetchDashboardSummary()
+  }, [fetchShelves, fetchBooks, fetchDashboardSummary]))
 
   useSocket('shelf_book_removed', useCallback(() => {
     fetchShelves()
     fetchBooks()
-  }, [fetchShelves, fetchBooks]))
+    fetchDashboardSummary()
+  }, [fetchShelves, fetchBooks, fetchDashboardSummary]))
 
   useSocket('shelf_shared', useCallback(() => {
     fetchShelves()
+    fetchDashboardSummary()
     triggerActivityRefresh()
-  }, [fetchShelves, triggerActivityRefresh]))
+  }, [fetchShelves, fetchDashboardSummary, triggerActivityRefresh]))
 
   useSocket('shelf_role_changed', useCallback(() => {
     fetchShelves()
@@ -318,8 +351,9 @@ export default function Dashboard() {
 
   useSocket('shelf_share_removed', useCallback(() => {
     fetchShelves()
+    fetchDashboardSummary()
     triggerActivityRefresh()
-  }, [fetchShelves, triggerActivityRefresh]))
+  }, [fetchShelves, fetchDashboardSummary, triggerActivityRefresh]))
 
   // Instant room revocation notification (Safeguard 2)
   useSocket('shelf_access_revoked', useCallback((data) => {
@@ -328,20 +362,23 @@ export default function Dashboard() {
     }
     fetchShelves()
     fetchBooks()
-  }, [selectedShelfId, fetchShelves, fetchBooks]))
+    fetchDashboardSummary()
+  }, [selectedShelfId, fetchShelves, fetchBooks, fetchDashboardSummary]))
 
   // 4. Live Lending Events
   useSocket('book_lent', useCallback(() => {
     fetchLendingData()
     fetchBooks()
+    fetchDashboardSummary()
     triggerActivityRefresh()
-  }, [fetchLendingData, fetchBooks, triggerActivityRefresh]))
+  }, [fetchLendingData, fetchBooks, fetchDashboardSummary, triggerActivityRefresh]))
 
   useSocket('book_returned', useCallback(() => {
     fetchLendingData()
     fetchBooks()
+    fetchDashboardSummary()
     triggerActivityRefresh()
-  }, [fetchLendingData, fetchBooks, triggerActivityRefresh]))
+  }, [fetchLendingData, fetchBooks, fetchDashboardSummary, triggerActivityRefresh]))
 
   // 5. Live Activity Feed Sync
   useSocket('activity_created', useCallback(() => {
@@ -375,7 +412,7 @@ export default function Dashboard() {
   // Unified Progress Save Handler
   const handleSaveProgress = async (bookId, progressData) => {
     const res = await updateBookProgressApi(bookId, progressData)
-    await Promise.all([fetchBooks(), fetchReadingStats()])
+    await Promise.all([fetchBooks(), fetchReadingStats(), fetchDashboardSummary()])
     triggerActivityRefresh()
     if (res.data?.milestone) {
       setMilestoneToast({
@@ -421,7 +458,7 @@ export default function Dashboard() {
         }
       }
     }
-    await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats()])
+    await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats(), fetchDashboardSummary()])
     triggerActivityRefresh()
   }
 
@@ -429,7 +466,7 @@ export default function Dashboard() {
     if (window.confirm(`Are you sure you want to remove "${bookTitle}" from your library?`)) {
       try {
         await deleteBookApi(bookId)
-        await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats()])
+        await Promise.all([fetchBooks(), fetchShelves(), fetchTotalCatalogCount(), fetchReadingStats(), fetchDashboardSummary()])
         triggerActivityRefresh()
       } catch (err) {
         alert(err.response?.data?.detail || 'Failed to delete book.')
@@ -457,7 +494,7 @@ export default function Dashboard() {
     } else if (shelfModalState.shelf) {
       await updateShelfApi(shelfModalState.shelf.id, data)
     }
-    await fetchShelves()
+    await Promise.all([fetchShelves(), fetchDashboardSummary()])
   }
 
   const handleDeleteShelf = async (shelf) => {
@@ -472,7 +509,7 @@ export default function Dashboard() {
         setSelectedShelfId(null)
         setPage(1)
       }
-      await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount()])
+      await Promise.all([fetchShelves(), fetchBooks(), fetchTotalCatalogCount(), fetchDashboardSummary()])
     } catch (err) {
       alert(err.response?.data?.detail || 'Failed to delete shelf.')
     }
@@ -481,7 +518,7 @@ export default function Dashboard() {
   const handleRemoveFromShelf = async (shelfId, bookId, bookTitle, shelfName) => {
     try {
       await removeBookFromShelfApi(shelfId, bookId)
-      await Promise.all([fetchBooks(), fetchShelves()])
+      await Promise.all([fetchBooks(), fetchShelves(), fetchDashboardSummary()])
     } catch (err) {
       alert(err.response?.data?.detail || `Failed to remove "${bookTitle}" from "${shelfName}".`)
     }
@@ -498,7 +535,7 @@ export default function Dashboard() {
   }
 
   const handleAssignedChange = async () => {
-    await Promise.all([fetchBooks(), fetchShelves()])
+    await Promise.all([fetchBooks(), fetchShelves(), fetchDashboardSummary()])
   }
 
 
@@ -685,6 +722,13 @@ export default function Dashboard() {
 
       {/* Main Content Area */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-xl)' }}>
+        {/* Dedicated Dashboard Summary Overview (Step 2 - Requirement #32) */}
+        <DashboardSummary
+          summary={dashboardSummary}
+          loading={dashboardSummaryLoading}
+          error={dashboardSummaryError}
+        />
+
         {/* Phase 6 Reading Statistics Banner */}
         <ReadingStatsBanner stats={readingStats} loading={readingStatsLoading} />
 

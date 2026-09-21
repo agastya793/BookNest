@@ -38,6 +38,11 @@ from app.schemas.activity import (
     ActivityLogResponse,
     ActivityListResponse,
 )
+from app.schemas.dashboard import (
+    StatusCounts,
+    TopShelfSummary,
+    DashboardSummaryResponse,
+)
 
 __all__ = [
     "UserCreate",
@@ -70,5 +75,8 @@ __all__ = [
     "LendingSummary",
     "ActivityLogResponse",
     "ActivityListResponse",
+    "StatusCounts",
+    "TopShelfSummary",
+    "DashboardSummaryResponse",
 ]
 
