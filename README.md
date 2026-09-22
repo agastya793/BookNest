@@ -823,14 +823,21 @@ Sensible future enhancements for production deployment:
 
 ## 🤖 AI Usage Disclosure
 
-In accordance with assessment guidelines, AI assistance tools were utilized during the development of BookNest:
-* **Ideation & Architecture:** Exploring edge cases in token rotation concurrency, schema design for partial unique indexes, and WebSocket room isolation strategies.
-* **Boilerplate & Test Generation:** Generating comprehensive integration test scripts, assertion patterns, and mock datasets.
-* **Documentation Structuring:** Drafting and formatting markdown documentation, tables, and architectural workflows.
+AI-assisted development was used extensively during the development of BookNest.
 
-**Human Engineering Verification:**
-* All architectural decisions, database models, business logic invariants, and security rules were designed, reviewed, and finalized by the developer.
-* All code, migrations, and test suites were executed, debugged, and verified locally against PostgreSQL and live browser sessions. AI output was never accepted without manual validation and empirical verification.
+AI tools were used for:
+- Requirements interpretation and implementation planning
+- Architecture and database design exploration
+- Code generation and implementation across backend and frontend features
+- Debugging and refactoring
+- Test generation and verification scripts
+- Documentation and README drafting
+
+The development process was iterative: requirements were provided to the AI tools, generated implementations were inspected and adjusted where necessary, and the resulting application was run and tested locally against PostgreSQL and live browser sessions.
+
+The developer remained responsible for directing the implementation, validating behavior against the assessment requirements, running the application, reviewing test results, identifying issues, and making final decisions about what was included in the submitted repository.
+
+No AI-generated behavior was treated as automatically correct; the final implementation was validated through automated tests, clean-clone verification, API checks, and browser-based testing.
 
 ---
 
