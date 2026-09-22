@@ -841,37 +841,6 @@ No AI-generated behavior was treated as automatically correct; the final impleme
 
 ---
 
-## 🎬 Demo Walkthrough (4–6 Minutes)
-
-A suggested demonstration flow using the seeded demo data:
-
-1. **Setup Browsers:**
-   * Open two separate browser windows (or one regular window and one incognito window).
-   * **Browser 1 (Owner):** Log in as `owner@booknest.demo` (`DemoPassword123!`).
-   * **Browser 2 (Collaborator):** Log in as `collaborator@booknest.demo` (`DemoPassword123!`).
-2. **Dashboard Overview (Browser 1):**
-   * Observe the dashboard metrics: Status Counts (1 want to read, 2 reading, 2 finished), Books Finished This Year (2), Average Rating (4.5), Shelf with Most Books ("Favorites", 3 books), and Books Lent Out (1).
-   * Review the recent activity audit stream.
-3. **Personal Library & Filtering (Browser 1):**
-   * Navigate to the library view. Test filtering by status (`reading`), searching by author (`Kleppmann`), and sorting by rating.
-   * Observe server-side pagination with non-overlapping pages and stable ordering.
-4. **Reading Progress & Milestone Updates (Browser 1):**
-   * Select *The Pragmatic Programmer* (currently `want_to_read`, page 0).
-   * Update progress to page 88.
-   * Observe the automated status transition from `want_to_read` to `reading` and the 25% milestone celebration toast.
-5. **Shared Shelves & RBAC Demonstration (Browser 1 & 2):**
-   * On Browser 2 (Collaborator), observe the "Shared with me" section showing "Favorites" (Editor badge) and "Backend & Tech" (Viewer badge).
-   * Open "Favorites" on Browser 2: Add Collaborator's owned book (*Refactoring*) to the shelf.
-   * Open "Backend & Tech" on Browser 2: Confirm that add/remove book actions and collaborator settings are disabled (Viewer read-only mode).
-6. **Peer-to-Peer Book Lending & Return (Browser 1 & 2):**
-   * On Browser 2, click the "Borrowed" tab to view *Domain-Driven Design* borrowed from Demo Owner (read-only mode; cannot edit or lend onward).
-   * On Browser 1, navigate to the "Lent" tab and click "Mark Returned" on *Domain-Driven Design*.
-   * Watch Browser 2 immediately reflect the loan return in real-time via WebSocket without reloading the page.
-7. **Activity Feed Audit Trail (Browser 1 & 2):**
-   * Open the Activity Feed on both browsers to inspect the chronologically logged events (`status_changed`, `shelf_book_added`, `book_returned`) with proper user scoping.
-
----
-
 ## 📦 Submission & Git Notes
 
 * **Repository Integrity:** Public GitHub repository with a clean, granular, chronological Git commit history demonstrating iterative development across all phases.
