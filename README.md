@@ -1,125 +1,141 @@
 # BookNest
 
-> A full-stack reading tracker application designed for personal library management, custom shelf organization, collaborative shelf sharing with role-based permissions, reading progress tracking, and peer-to-peer book lending.
+A full-stack reading tracker with authentication, books, custom shelves, collaboration/RBAC, reading progress, peer-to-peer lending, activity logging, real-time synchronization, and dashboard analytics.
 
 ---
 
-## 📌 Project Overview
+## 📌 Features
 
-BookNest is an application built for managing books, tracking reading milestones, and sharing collections with other users. It emphasizes real-world database relationships, transactional integrity, and edge-case handling (such as preventing duplicate active book loans via partial unique database indexes).
+### Authentication & User Isolation
+* **User Registration & Login:** Email and password authentication with complexity validation (8–72 characters, uppercase, lowercase, digit, and special symbol).
+* **JWT Access Tokens:** Short-lived (15-minute) signed JWT tokens held strictly in React application memory—never persisted in `localStorage` or `sessionStorage`.
+* **HttpOnly Refresh Cookies:** Long-lived (7-day) cryptographically random refresh tokens stored in secure, `HttpOnly`, `SameSite=Lax` cookies, protected from cross-site scripting (XSS).
+* **Token Rotation & Pessimistic Concurrency:** Single-use refresh token rotation guarded by PostgreSQL row-level locks (`SELECT ... FOR UPDATE`), preventing token replay and race conditions.
+* **Revocation on Logout:** Instant server-side revocation on logout by deleting the stored token hash and clearing browser cookies.
+* **Password Hashing:** Passwords hashed with `bcrypt` (enforcing the 72-byte truncation boundary prior to hashing).
+* **Multi-User Isolation:** Strict database-level scoping ensuring users can only view, modify, or query their own catalog and authorized collaborations.
 
-### Current Implementation Status
-* **Phase 0 (Architecture Blueprint):** Complete domain model design, API endpoint specifications, permission matrices, and implementation sequencing.
-* **Phase 1 (Project Scaffold & Database Layer):** Complete backend application skeleton, SQLAlchemy 2.0 ORM models, Alembic migrations executed against PostgreSQL, Vite + React frontend configuration with Axios client and local proxy, and design tokens.
-* **Phase 2 (Authentication Layer):** Complete JWT access tokens in React memory, HttpOnly refresh cookies, SHA-256 token hashing, SELECT FOR UPDATE rotation concurrency safety, password policy enforcement, Axios 401 interceptor replay queue, and React Router protected routing.
-* **Phase 3 (Book Management & Personal Library CRUD):** Complete personal book cataloging, Pydantic v2 cross-field validation, computed progress_percentage, status lifecycle management, strict multi-user isolation, and interactive library UI with search, status filters, and progress tracking.
-* **Phase 4 (Custom Shelves & Many-to-Many Book Categorization):** Complete user-owned custom shelves, many-to-many book-to-shelf categorization, cascade safety, duplicate constraint race protection (409 Conflict), empty shelf listings via LEFT OUTER JOIN, dual-ownership shelf filtering, and responsive modular frontend (ShelfSidebar, ShelfModal, AssignShelfModal).
-* **Phase 5 (Shared Shelves & Role-Based Access Control):** Complete collaborative shelf sharing with RBAC (Owner, Editor, Viewer roles), centralized permission resolver, member book ownership isolation, cascade safety, and responsive UI with ShelfShareModal, segregated "My Shelves" / "Shared with me" sidebar, and active shelf permissions.
-* **Phase 6 (Reading Progress Tracker, Page Updates & Statistics):** Complete reading progress tracker with boundary validation, automated status lifecycle transitions (want_to_read -> reading -> finished), milestone tracking (25%, 50%, 75%, 100%), single-occurrence milestone celebration toasts, aggregated reading statistics endpoint (GET /api/books/stats/summary), single ActivityLog audit records, and interactive frontend UI (ProgressModal with scrubber, quick steppers, notes, and ReadingStatsBanner).
-* **Phase 7 (Peer-to-Peer Book Lending & Active Loan Enforcement):** Complete book loan tracking between registered users, database engine invariant via PostgreSQL partial unique index `ix_lending_active_book` (`book_id WHERE is_active = true`), dedicated borrower read-only view (`GET /api/lending/borrowed`), owner-only return action (`POST /api/lending/{id}/return`), and interactive UI with LendBookModal, LendingHistoryModal, and dedicated Lent/Borrowed tabs.
-* **Phase 8 (Activity Feed & Event Audit Logging):** Complete event audit logging across book additions, progress updates, status transitions, shelf sharing, collaborator role changes, share revocations, and peer book lending/returns. Centralized `create_activity_log` helper enforcing atomic single-transaction commit invariants, server-side paginated `/api/activities` endpoint with query scoping (personal isolation, active shelf member visibility, borrower/lender participant access), and interactive frontend UI with `ActivityFeed` component, category filter tabs, server-side pagination, and dashboard integration.
-* **Phase 9 (Real-time WebSocket Updates):** Complete bi-directional real-time event broadcasting using `python-socketio` mounted via `socket_app` ASGI wrapper. Short-lived access JWT handshake authentication, room scoping (`user_{user_id}` and `shelf_{shelf_id}`), instantaneous shelf collaborator room revocation, post-commit event emissions across books, shelves, lending, and activity feeds, React `SocketContext` and `useSocket` hooks, live connection status indicator in Navbar, and lightweight refetch synchronization.
-* **Phase 10+ (Future Implementations):** *Planned* (Statistics Dashboard & Analytics Aggregations, Seed Script, Automated Pytest Suite, etc.).
+### Book Catalog Management
+* **Full CRUD Lifecycle:** Add, view, edit (full PUT and partial PATCH), and delete books from personal collections.
+* **Server-Side Pagination:** PostgreSQL `LIMIT` and `OFFSET` execution with total record counting and page calculation.
+* **Live Search:** Fast, case-insensitive keyword search against both book title and author using SQL `ILIKE`.
+* **Status Filtering:** Filter library catalog by reading state (`want_to_read`, `reading`, `finished`).
+* **Multi-Criteria Sorting:** Sort by date added, updated date, title, author, rating, or current page, with deterministic secondary sorting by `id ASC` to prevent pagination jitter.
+* **Reading Progress:** Real-time page count tracking with computed percentage and input boundary checks (`current_page <= total_pages`).
+* **Automatic Status Lifecycle:** State machine automatically advances `want_to_read` to `reading` on progress, marks books `finished` when reaching the final page, and sets/clears completion dates.
 
----
+### Custom Shelves & Role-Based Access Control (RBAC)
+* **Custom Shelves:** Create, list, rename, and delete custom shelves (enforced unique shelf names per user).
+* **Many-to-Many Relationships:** Flexible categorization allowing books to belong to multiple shelves simultaneously via `shelf_books`.
+* **Shelf Sharing & RBAC:** Three granular privilege tiers:
+  * **Owner:** Full control—create, rename, delete shelf, invite/remove collaborators, change roles, and add/remove own books.
+  * **Editor:** Add and remove their own books to/from the shared shelf; cannot rename/delete the shelf or manage collaborators.
+  * **Viewer:** Read-only access—view shelf metadata, assigned books, and member lists.
+* **Backend-Enforced Authorization:** Centralized permission resolver (`get_shelf_with_role`) guarantees security rules are enforced at the API layer, returning `404 Not Found` for uninvited users to prevent leaking private shelf existence.
+* **Member Book Ownership Isolation:** Collaborators can only assign books they personally own to shared shelves; member books remain safely in the creator's library if a shelf is removed.
 
-## 🏗️ Architecture
+### Reading Progress Tracking & Milestones
+* **Dedicated Progress Endpoint:** Dedicated `POST /api/books/{id}/progress` endpoint supporting page updates, reflection notes, and star ratings.
+* **Percentage & Boundary Validation:** Strict validation ensures current page cannot be negative or exceed total page count.
+* **Milestone Detection:** Single-trigger milestone detection at 25% (quarter), 50% (half), 75% (three-quarters), and 100% (completed).
+* **Automatic Finish:** Setting `current_page == total_pages` automatically marks the book as `finished` and records the UTC completion timestamp.
+* **Audit Trail Generation:** Atomic creation of at most one audit record per update (prioritizing `status_changed` over `progress_updated`).
 
-BookNest is built with a decoupled, high-integrity client-server architecture designed for reliability, real-time collaboration, and strict database-level data integrity:
+### Peer-to-Peer Book Lending
+* **Registered-User Lending:** Lend physical copies of owned books to other registered users by email address.
+* **Active-Loan Protection:** Invariant enforced at the database engine level via PostgreSQL partial unique index `ix_lending_active_book` (`book_id WHERE is_active = true`), guaranteeing a book cannot be lent simultaneously to multiple borrowers.
+* **Owner-Only Return Action:** Only the book owner/lender can mark an active loan as returned (`POST /api/lending/{id}/return`).
+* **Borrower Read-Only View:** Dedicated `/api/lending/borrowed` endpoint allows borrowers to see lent book details without modifying the owner's library record.
+* **Lending History:** Owners maintain a complete chronological record of all historical and active loans for every book in their catalog.
 
-```mermaid
-graph TB
-    subgraph Client ["Frontend Layer — React 19 + Vite (Port 5173)"]
-        direction TB
-        UI["React SPA<br/>(Components, Pages, Protected Routes)"]
-        Context["State Management<br/>(AuthContext, SocketContext)"]
-        Axios["Axios HTTP Client<br/>(baseURL: /api + 401 Interceptors)"]
-        SocketClient["Socket.IO Client<br/>(Realtime Event Listeners)"]
-        ViteProxy["Vite Dev Server Proxy<br/>(/api ➔ :8000 | /socket.io ➔ :8000)"]
-        
-        UI --> Context
-        Context --> Axios
-        Context --> SocketClient
-        Axios --> ViteProxy
-        SocketClient --> ViteProxy
-    end
+### Activity Feed & Audit Logging
+* **Audited System Events:** Comprehensive logging across `book_added`, `status_changed`, `progress_updated`, `shelf_shared`, `shelf_role_changed`, `shelf_share_removed`, `book_lent`, and `book_returned`.
+* **Reverse Chronological Feed:** Server-side paginated activity feed ordered newest-first.
+* **Privacy & Visibility Scoping:** Personal catalog activities are isolated to the owner; shelf activities are visible only to active collaborators; lending activities are restricted to the lender and borrower.
 
-    subgraph Backend ["Backend Layer — FastAPI (Port 8000)"]
-        direction TB
-        App["FastAPI Application & CORS Middleware"]
-        AuthGuard["Security & Auth Dependencies<br/>(get_current_user, JWT Bearer)"]
-        Routers["Modular Routers<br/>(/auth, /books, /shelves, /lending, /dashboard)"]
-        Services["Domain Services<br/>(auth_service, permission, realtime, activity)"]
-        SocketServer["Python-SocketIO Server<br/>(ASGI Realtime Event Broadcasting)"]
-        
-        App --> AuthGuard
-        App --> Routers
-        App --> SocketServer
-        Routers --> Services
-        SocketServer --> Services
-    end
+### Real-Time Synchronization (WebSockets)
+* **Socket.IO Integration:** Bi-directional event broadcasting powered by `python-socketio` mounted directly on the ASGI application.
+* **Authenticated Handshake:** WebSocket connection handshake verifies short-lived JWT access tokens; unauthenticated connections or refresh tokens are rejected.
+* **Personal & Shelf Rooms:** Clients join personal rooms (`user_{user_id}`) for private notifications and shelf rooms (`shelf_{shelf_id}`) for shared collaboration.
+* **Instant Room Revocation:** When an owner revokes collaborator access, the collaborator's active socket connections are evicted from the shelf room immediately and sent a revocation notice.
+* **Post-Commit Event Broadcast:** Real-time events are dispatched only after the database transaction successfully commits.
+* **Lightweight Refetch Pattern:** React frontend hooks respond to WebSocket events by refetching only affected data queries, preserving server-side pagination, sorting, and search state without race conditions.
 
-    subgraph Data ["Data & Persistence Layer — PostgreSQL"]
-        direction TB
-        ORM["SQLAlchemy 2.0 ORM & Engine<br/>(psycopg v3 Driver)"]
-        Alembic["Alembic Migrations<br/>(Transactional Schema Versioning)"]
-        
-        subgraph Tables ["PostgreSQL Database (booknest)"]
-            T_Users[("users<br/>Auth & Profiles")]
-            T_Books[("books<br/>Personal Library")]
-            T_Shelves[("shelves<br/>Custom Collections")]
-            T_ShelfBooks[("shelf_books<br/>M:N Join")]
-            T_ShelfShares[("shelf_shares<br/>RBAC: Editor / Viewer")]
-            T_Lendings[("lendings<br/>Partial Index: One Active Loan")]
-            T_Activity[("activity_logs<br/>Audit Trail")]
-            T_Tokens[("refresh_tokens<br/>Hashed Token Store")]
-        end
-        
-        ORM --> Tables
-        Alembic -.-> Tables
-    end
-
-    ViteProxy -- "HTTP / REST (JSON with JWT & Cookies)" --> App
-    ViteProxy -- "WebSocket Bi-directional Events" --> SocketServer
-    Services --> ORM
-```
-
-### Architectural Highlights
-
-1. **Frontend Isolation & Proxying:**
-   * The React SPA executes entirely client-side.
-   * In development, the Vite dev server acts as a reverse proxy, mapping `/api` and `/socket.io` to FastAPI on port `8000`.
-   * Requests stay same-origin from the browser's perspective, protecting against CORS quirks and enabling secure, first-party cookie handling for refresh tokens.
-
-2. **Modular FastAPI Backend:**
-   * Organized into explicit layers: **Routers** (HTTP transport), **Services** (business rules and calculations), and **Models** (database mapping).
-   * Dependency injection (`get_current_user`, `get_db`) cleanly decouples route handlers from session management and user authorization.
-
-3. **Database-Level Invariant Enforcement:**
-   * Rather than relying solely on application-layer checks, critical business rules are enforced at the PostgreSQL engine level:
-     * **No Double Lending:** Enforced by PostgreSQL partial unique index `ix_lending_active_book` (`book_id WHERE is_active = true`).
-     * **No Duplicate Shelves:** Enforced by `uq_shelf_user_name` on `(user_id, name)`.
-     * **Valid Ratings & Statuses:** Enforced by `CheckConstraint` on books and shelf roles.
-
+### Analytics Dashboard
+* **Server-Side Aggregations:** Consolidated dashboard summary endpoint (`GET /api/dashboard/summary`) calculated via SQL aggregations:
+  * Reading status counts (`want_to_read`, `reading`, `finished`).
+  * Books finished within the current calendar year.
+  * Average rating of owned rated books.
+  * Top shelf owned with the most books (with deterministic tie-breaking).
+  * Count of owned books currently lent out.
+  * Count of shelves shared with the user by others.
+* **Recent Activity Stream:** Instant feed of the user's latest actions integrated directly into the dashboard view.
 
 ---
 
 ## ⚡ Tech Stack
 
-| Layer | Technology | Purpose |
-|---|---|---|
-| **Backend Framework** | FastAPI 0.115 | High-performance Python web API with automatic OpenAPI documentation |
-| **ASGI Server** | Uvicorn 0.30 | ASGI server running the FastAPI application |
-| **ORM** | SQLAlchemy 2.0 | Type-annotated database mapping and query construction |
-| **DB Driver** | Psycopg 3.2 (`psycopg[binary]`) | Pure Python / binary PostgreSQL driver |
-| **Migrations** | Alembic 1.13 | Database schema versioning and auto-generation |
-| **Configuration** | Pydantic Settings 2.5 | Typed environment variable loading and validation |
-| **Frontend Framework** | React 19 | Declarative user interface library |
-| **Build Tool** | Vite 8 | Ultra-fast development server with Hot Module Replacement (HMR) |
-| **HTTP Client** | Axios 1.20 | Configured with `baseURL: '/api'` and cookie credentials enabled |
-| **Routing** | React Router 7 | Client-side routing and protected view management |
-| **Styling** | Vanilla CSS + CSS Variables | Curated design tokens with Inter font integration |
-| **Database** | PostgreSQL | Relational database with constraint and partial-index enforcement |
+### Backend
+* **Language & Runtime:** Python 3.11+
+* **Web Framework:** FastAPI 0.115.0
+* **ASGI Server:** Uvicorn 0.30.0
+* **Database ORM:** SQLAlchemy 2.0.35
+* **Database Driver:** Psycopg 3.2.3 (`psycopg[binary]`)
+* **Database Engine:** PostgreSQL 15+
+* **Migrations:** Alembic 1.13.0
+* **Data Validation:** Pydantic 2.9.0 & Pydantic Settings 2.5.0
+* **Authentication & JWT:** `python-jose[cryptography]` 3.3.0
+* **Password Hashing:** `passlib[bcrypt]` 1.7.4 & `bcrypt` 4.0.1
+* **Real-time WebSockets:** `python-socketio` 5.11.0 (ASGI mode)
+* **Testing & HTTP Client:** `httpx` 0.28.1
+
+### Frontend
+* **UI Framework:** React 19.3.0
+* **Build Tool & Dev Server:** Vite 8.3.0
+* **Routing:** React Router 7.18.4 (`react-router-dom`)
+* **HTTP Client:** Axios 1.20.0 (configured with interceptors, replay queue, and `withCredentials: true`)
+* **WebSocket Client:** `socket.io-client` 4.8.3
+* **Typography & Styling:** Vanilla CSS with CSS custom properties (design tokens) and Google Fonts (Inter)
+
+### Infrastructure & Tooling
+* **Version Control:** Git
+* **Integration Testing:** Executable Python asynchronous test suites (`httpx` + `python-socketio`)
+
+---
+
+## 💡 Why This Stack / Architecture
+
+BookNest is built as a decoupled, high-integrity client-server application:
+
+* **React + Vite:** Vite provides instant dev server start, sub-second Hot Module Replacement (HMR), and clean asset bundling. Building the frontend as a pure client Single Page Application (SPA) avoids Server-Side Rendering (SSR) hydration complexity and keeps the long-lived WebSocket connection stable across page transitions.
+* **FastAPI:** Provides high-performance asynchronous HTTP handling, Python type hints, Pydantic request/response schema validation, dependency injection for session management, and auto-generated OpenAPI documentation.
+* **PostgreSQL:** Provides strict transactional relational storage (ACID), foreign keys with cascading deletions, check constraints, and PostgreSQL-specific partial unique indexes that enforce business invariants directly in the database engine.
+* **SQLAlchemy 2.0:** Enables type-annotated query construction, relationships, and selective join loading (`selectinload`), avoiding N+1 query overhead.
+* **Alembic:** Provides declarative, repeatable schema versioning and database migration tracking.
+* **Python-SocketIO:** Provides low-latency event broadcasting with room abstractions (`user_{id}`, `shelf_{id}`) running directly within the ASGI application lifecycle.
+
+### High-Level Architecture Flow
+
+```
+[ Frontend: React 19 SPA ]
+      │             ▲
+  HTTP REST     WebSocket
+(Axios + JWT)  (Socket.IO)
+      │             ▲
+      ▼             │
+[ ASGI Application Wrapper: socket_app (Port 8000) ]
+      ├──> FastAPI Router Layer (/api/auth, /books, /shelves, /lending, /dashboard)
+      │         │
+      │    Service Layer (auth_service, book_service, shelf_service, lending_service)
+      │         │
+      │    SQLAlchemy 2.0 ORM
+      │         │
+      │    PostgreSQL Database (Tables, Checks, Partial Unique Index)
+      │
+      └──> Python-SocketIO Server (ASGI)
+                │
+           Realtime Broadcasts (Personal & Shelf Rooms)
+```
 
 ---
 
@@ -130,107 +146,418 @@ BookNest/
 ├── backend/
 │   ├── alembic/
 │   │   ├── versions/
-│   │   │   └── 2026_09_17_1857-19f40499af4c_initial_tables.py   # Initial database schema
-│   │   ├── env.py                                               # Alembic environment runner
+│   │   │   └── 2026_09_17_1857-19f40499af4c_initial_tables.py   # Complete schema migration
+│   │   ├── env.py                                               # Alembic runtime environment
 │   │   └── script.py.mako
 │   ├── app/
 │   │   ├── models/                                              # SQLAlchemy 2.0 ORM models
-│   │   │   ├── __init__.py                                      # Model registry for Alembic
+│   │   │   ├── __init__.py                                      # Metadata registry
 │   │   │   ├── activity_log.py                                  # ActivityLog entity
-│   │   │   ├── book.py                                          # Book entity
+│   │   │   ├── book.py                                          # Book entity with check constraints
 │   │   │   ├── lending.py                                       # Lending entity with partial index
-│   │   │   ├── refresh_token.py                                 # RefreshToken entity
+│   │   │   ├── refresh_token.py                                 # RefreshToken entity (SHA-256 hashes)
 │   │   │   ├── shelf.py                                         # Shelf entity
 │   │   │   ├── shelf_book.py                                    # ShelfBook (many-to-many join)
-│   │   │   ├── shelf_share.py                                   # ShelfShare (collaborator roles)
+│   │   │   ├── shelf_share.py                                   # ShelfShare (collaborator RBAC)
 │   │   │   └── user.py                                          # User entity
-│   │   ├── routers/                                             # API routers (Planned: Phase 2+)
-│   │   ├── schemas/                                             # Pydantic validation schemas (Planned: Phase 2+)
-│   │   ├── services/                                            # Domain business logic (Planned: Phase 2+)
-│   │   ├── config.py                                            # Pydantic BaseSettings loader
-│   │   ├── database.py                                          # Engine, SessionLocal, Base, get_db()
-│   │   ├── dependencies.py                                      # Dependency injection stubs
-│   │   └── main.py                                              # FastAPI application entrypoint & CORS
-│   ├── alembic.ini                                              # Alembic configuration
-│   ├── requirements.txt                                         # Python dependencies
+│   │   ├── schemas/                                             # Pydantic validation schemas
+│   │   │   ├── activity.py
+│   │   │   ├── auth.py
+│   │   │   ├── book.py
+│   │   │   ├── dashboard.py
+│   │   │   ├── lending.py
+│   │   │   └── shelf.py
+│   │   ├── services/                                            # Domain business logic & invariants
+│   │   │   ├── activity_service.py                              # Activity feed and audit logging
+│   │   │   ├── auth_service.py                                  # JWT issuance & pessimistic rotation
+│   │   │   ├── book_service.py                                  # Catalog CRUD, pagination, milestones
+│   │   │   ├── dashboard_service.py                             # Server-side SQL dashboard metrics
+│   │   │   ├── lending_service.py                               # Peer lending & return operations
+│   │   │   ├── realtime_service.py                              # Socket.IO rooms & event dispatch
+│   │   │   └── shelf_service.py                                 # Shelf operations & RBAC resolver
+│   │   ├── routers/                                             # FastAPI HTTP endpoints
+│   │   │   ├── activity.py                                      # /api/activities
+│   │   │   ├── auth.py                                          # /api/auth
+│   │   │   ├── books.py                                         # /api/books
+│   │   │   ├── dashboard.py                                     # /api/dashboard
+│   │   │   ├── lending.py                                       # /api/lending
+│   │   │   └── shelves.py                                       # /api/shelves
+│   │   ├── config.py                                            # Typed settings (pydantic-settings)
+│   │   ├── database.py                                          # SQLAlchemy engine & session factory
+│   │   ├── dependencies.py                                      # get_current_user & get_db injection
+│   │   └── main.py                                              # FastAPI app & Socket.IO ASGI mount
+│   ├── alembic.ini                                              # Migration configuration
+│   ├── requirements.txt                                         # Python package dependencies
+│   ├── seed.py                                                  # Deterministic, idempotent demo seed
+│   ├── test_auth_phase2.py                                      # Auth integration test suite
+│   ├── test_books_phase3.py                                     # Books CRUD test suite
+│   ├── test_pagination.py                                       # Server-side pagination test suite
+│   ├── test_shelves_phase4.py                                   # Shelves & M:N test suite
+│   ├── test_shelf_sharing_phase5.py                             # Shelf sharing & RBAC test suite
+│   ├── test_progress_phase6.py                                  # Reading progress & milestones test
+│   ├── test_lending_phase7.py                                   # Peer lending & return test suite
+│   ├── test_activity_phase8.py                                  # Activity logging & scoping test suite
+│   ├── test_realtime_phase9.py                                  # WebSocket Socket.IO test suite
+│   ├── test_dashboard_step2.py                                  # Dashboard metrics test suite
+│   ├── test_seed.py                                             # Seed script verification test suite
 │   └── .env.example                                             # Backend environment template
 ├── frontend/
-│   ├── public/                                                  # Static assets & icons
+│   ├── public/                                                  # Static assets & favicon
 │   ├── src/
-│   │   ├── api/
-│   │   │   └── client.js                                        # Configured Axios instance (`/api`)
-│   │   ├── assets/                                              # Local media
-│   │   ├── components/                                          # UI components (Planned)
-│   │   ├── context/                                             # AuthContext & SocketContext (Planned)
-│   │   ├── hooks/                                               # Custom React hooks (Planned)
-│   │   ├── pages/                                               # Application views (Planned)
+│   │   ├── api/                                                 # Axios API clients
+│   │   │   ├── activity.js
+│   │   │   ├── auth.js
+│   │   │   ├── books.js
+│   │   │   ├── client.js                                        # Axios instance with 401 replay queue
+│   │   │   ├── dashboard.js
+│   │   │   ├── lending.js
+│   │   │   └── shelves.js
+│   │   ├── components/                                          # Modular React components
+│   │   │   ├── ActivityFeed.jsx
+│   │   │   ├── AssignShelfModal.jsx
+│   │   │   ├── BookCard.jsx
+│   │   │   ├── BookModal.jsx
+│   │   │   ├── DashboardSummary.jsx
+│   │   │   ├── LendBookModal.jsx
+│   │   │   ├── LendingHistoryModal.jsx
+│   │   │   ├── Navbar.jsx
+│   │   │   ├── ProgressModal.jsx
+│   │   │   ├── ProtectedRoute.jsx
+│   │   │   ├── ReadingStatsBanner.jsx
+│   │   │   ├── ShelfModal.jsx
+│   │   │   ├── ShelfShareModal.jsx
+│   │   │   └── ShelfSidebar.jsx
+│   │   ├── context/                                             # Global React contexts
+│   │   │   ├── AuthContext.jsx                                  # User state & session initialization
+│   │   │   └── SocketContext.jsx                                # Socket.IO connection & rooms
+│   │   ├── hooks/                                               # Custom React hooks
+│   │   │   ├── useApi.js
+│   │   │   └── useSocket.js
+│   │   ├── pages/                                               # Application views
+│   │   │   ├── Dashboard.jsx                                    # Main app interface
+│   │   │   ├── Login.jsx                                        # User sign-in
+│   │   │   └── Signup.jsx                                       # User registration
 │   │   ├── styles/
-│   │   │   ├── global.css                                       # Global CSS resets and utility styles
-│   │   │   └── variables.css                                    # Theme tokens (colors, typography, spacing)
-│   │   ├── App.jsx                                              # Root React component
-│   │   └── main.jsx                                             # Application DOM mount
+│   │   │   ├── global.css                                       # CSS resets & utility styles
+│   │   │   └── variables.css                                    # Theme tokens & variables
+│   │   ├── App.jsx                                              # Root component & route config
+│   │   └── main.jsx                                             # React DOM entrypoint
 │   ├── index.html                                               # Entry HTML with Inter font loader
 │   ├── package.json                                             # Frontend dependencies and scripts
 │   ├── tsconfig.json                                            # TypeScript/bundler configuration
-│   └── vite.config.js                                           # Vite proxy & plugin configuration
+│   └── vite.config.js                                           # Vite dev proxy configuration
 ├── tests/
-│   └── conftest.py                                              # Pytest setup (Planned: Phase 12)
+│   └── conftest.py
 ├── .env.example                                                 # Root environment template
-└── .gitignore                                                   # Git exclusion rules
+├── .gitignore
+└── README.md
 ```
 
 ---
 
-## 🗄️ Database Entities (Implemented)
+## 🗄️ Data Model
 
-All 8 application tables are created and managed via Alembic migration `19f40499af4c`:
+The application uses 8 relational tables managed via Alembic migration `19f40499af4c`:
 
-1. **`users`**: User account details (`id`, `name`, `email` [unique, indexed], `password_hash`, `created_at`).
-2. **`books`**: Personal catalog books (`id`, `user_id` [FK], `title`, `author`, `status` [check constraint: `want_to_read`, `reading`, `finished`], `total_pages`, `current_page`, `rating` [check: 1–5], `notes`, `finished_date`, timestamps).
-3. **`shelves`**: User collections (`id`, `user_id` [FK], `name`, unique constraint on `(user_id, name)`).
-4. **`shelf_books`**: Join table connecting books to shelves (`id`, `shelf_id` [FK], `book_id` [FK], unique constraint on `(shelf_id, book_id)`).
-5. **`shelf_shares`**: Collaboration access (`id`, `shelf_id` [FK], `user_id` [FK], `role` [check constraint: `editor`, `viewer`], unique constraint on `(shelf_id, user_id)`).
-6. **`lendings`**: Book loan tracking (`id`, `book_id` [FK], `lender_id` [FK], `borrower_id` [FK], `is_active`, `lent_at`, `returned_at`).
-   * **Partial Unique Index:** `ix_lending_active_book` on `book_id WHERE is_active = true`. Enforces at the database engine level that a book cannot be actively lent to more than one borrower simultaneously.
-7. **`activity_logs`**: Audit trail and events (`id`, `user_id` [FK], `action`, `details` [JSON], `shelf_id` [FK nullable], `created_at`).
-8. **`refresh_tokens`**: Hashed token rotation store (`id`, `user_id` [FK], `token_hash` [unique, indexed], `expires_at`, `created_at`).
+```
+┌──────────────┐       1:N       ┌──────────────────┐
+│    users     ├────────────────>│      books       │
+└──────┬───────┘                 └────────┬─────────┘
+       │                                  │
+       │ 1:N                              │ 1:N
+       ▼                                  ▼
+┌──────────────┐       1:N       ┌──────────────────┐
+│   shelves    ├────────────────>│   shelf_books    │ (M:N Join)
+└──────┬───────┘                 └──────────────────┘
+       │
+       │ 1:N
+       ▼
+┌──────────────┐
+│ shelf_shares │ (RBAC: editor / viewer)
+└──────────────┘
 
----
-
-## ⚙️ Environment Configuration
-
-Copy `.env.example` to create your local `.env` inside `backend/`:
-
-```bash
-cp backend/.env.example backend/.env
+┌──────────────┐                 ┌──────────────────┐
+│   lendings   │                 │  activity_logs   │
+│ (Partial Idx)│                 └──────────────────┘
+└──────────────┘
+┌──────────────┐
+│refresh_tokens│
+│(Hashed Store)│
+└──────────────┘
 ```
 
-### Environment Variables Reference
+### Table Definitions & Constraints
 
-| Variable | Description | Example Default |
-|---|---|---|
-| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/booknest` |
-| `SECRET_KEY` | Secret key used to sign JWT tokens | `your-secret-key-change-in-production` |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | Lifespan of JWT access token | `15` |
-| `REFRESH_TOKEN_EXPIRE_DAYS` | Lifespan of refresh token | `7` |
-| `CORS_ORIGINS` | Allowed origins formatted as a JSON string array | `["http://localhost:5173","http://127.0.0.1:5173"]` |
-
-> **Note:** If your PostgreSQL password contains special characters (such as `@`), URL-encode them in `DATABASE_URL` (e.g. `@` becomes `%40`).
+1. **`users`**:
+   * Fields: `id` (UUID PK), `name` (VARCHAR), `email` (VARCHAR, Unique, Indexed), `password_hash` (VARCHAR), `created_at` (TIMESTAMPTZ).
+   * Relationships: Owns books, shelves, activity logs, refresh tokens, and lending transactions.
+2. **`books`**:
+   * Fields: `id` (UUID PK), `user_id` (UUID FK -> `users.id` CASCADE), `title` (VARCHAR), `author` (VARCHAR), `status` (VARCHAR, Indexed), `total_pages` (INT NULL), `current_page` (INT), `rating` (INT NULL), `notes` (TEXT NULL), `finished_date` (TIMESTAMPTZ NULL), `created_at` (TIMESTAMPTZ, Indexed), `updated_at` (TIMESTAMPTZ).
+   * Check Constraints:
+     * `ck_book_status`: `status IN ('want_to_read', 'reading', 'finished')`
+     * `ck_book_rating`: `rating >= 1 AND rating <= 5`
+     * `ck_book_current_page`: `current_page >= 0`
+3. **`shelves`**:
+   * Fields: `id` (UUID PK), `user_id` (UUID FK -> `users.id` CASCADE), `name` (VARCHAR), `created_at` (TIMESTAMPTZ).
+   * Constraints: `uq_shelf_user_name` Unique constraint on `(user_id, name)`.
+4. **`shelf_books`**:
+   * Join table implementing the many-to-many relationship between shelves and books.
+   * Fields: `id` (UUID PK), `shelf_id` (UUID FK -> `shelves.id` CASCADE), `book_id` (UUID FK -> `books.id` CASCADE), `added_at` (TIMESTAMPTZ).
+   * Constraints: `uq_shelf_book` Unique constraint on `(shelf_id, book_id)` preventing duplicate shelf assignments.
+5. **`shelf_shares`**:
+   * Role-based collaborator relationship on shared shelves.
+   * Fields: `id` (UUID PK), `shelf_id` (UUID FK -> `shelves.id` CASCADE), `user_id` (UUID FK -> `users.id` CASCADE), `role` (VARCHAR), `created_at` (TIMESTAMPTZ).
+   * Constraints: `uq_shelf_share_user` Unique constraint on `(shelf_id, user_id)` preventing duplicate shares to the same user; `ck_shelf_share_role` Check constraint `role IN ('editor', 'viewer')`.
+6. **`lendings`**:
+   * Peer-to-peer loan tracking records.
+   * Fields: `id` (UUID PK), `book_id` (UUID FK -> `books.id` CASCADE), `lender_id` (UUID FK -> `users.id` CASCADE), `borrower_id` (UUID FK -> `users.id` CASCADE), `is_active` (BOOLEAN, Indexed), `lent_at` (TIMESTAMPTZ), `returned_at` (TIMESTAMPTZ NULL).
+   * **Partial Unique Index:** `ix_lending_active_book` on `book_id WHERE is_active = true`. Enforces at the database engine level that no book can have more than one active loan simultaneously.
+7. **`activity_logs`**:
+   * Append-only audit logging table.
+   * Fields: `id` (UUID PK), `user_id` (UUID FK -> `users.id` CASCADE), `action` (VARCHAR, Indexed), `details` (JSON NULL), `shelf_id` (UUID FK -> `shelves.id` SET NULL), `created_at` (TIMESTAMPTZ, Indexed).
+8. **`refresh_tokens`**:
+   * Storage for hashed refresh tokens.
+   * Fields: `id` (UUID PK), `user_id` (UUID FK -> `users.id` CASCADE), `token_hash` (VARCHAR, Unique, Indexed), `expires_at` (TIMESTAMPTZ, Indexed), `created_at` (TIMESTAMPTZ).
 
 ---
 
-## 🚀 Setup & Local Run Instructions
+## 🔐 Authentication & Refresh Flow
+
+BookNest uses a defense-in-depth token authentication architecture:
+
+```
+[ User Action: Login / Signup ]
+              │
+              ▼
+   POST /api/auth/login
+              │
+   ┌──────────┴────────────────────────┐
+   ▼                                   ▼
+Response Body:                    Set-Cookie:
+{ access_token }             refresh_token=<raw_token>
+(Stored in React memory)     (HttpOnly, SameSite=Lax, Path=/api/auth)
+                                       │
+                                       ▼
+                             PostgreSQL Database:
+                             Stores SHA-256(raw_token)
+```
+
+### Access & Refresh Lifecycle
+1. **Token Lifetimes:**
+   * **Access Token:** 15 minutes (`ACCESS_TOKEN_EXPIRE_MINUTES=15`).
+   * **Refresh Token:** 7 days (`REFRESH_TOKEN_EXPIRE_DAYS=7`).
+2. **Cookie Security:**
+   * The refresh token cookie is configured with `HttpOnly=True`, `SameSite=Lax`, and `Path=/api/auth`.
+   * `Secure`: Controlled dynamically via the `COOKIE_SECURE` environment variable (`false` in local development over HTTP; `true` in HTTPS production).
+3. **Database Hash Storage:**
+   * Raw refresh tokens are never written to disk. Only deterministic SHA-256 hex digests (`token_hash`) are stored in PostgreSQL.
+4. **Pessimistic Rotation Concurrency (`SELECT ... FOR UPDATE`):**
+   * Single-use rotation: When a client calls `/api/auth/refresh`, the server looks up the token record using a pessimistic row-level lock (`with_for_update()`).
+   * If two requests with the same refresh token arrive simultaneously, the first acquires the lock, invalidates the old record, and issues new tokens. The second request unblocks, discovers the token row no longer exists, and is rejected with `401 Unauthorized`.
+5. **Revocation:**
+   * Calling `POST /api/auth/logout` deletes the hashed token row from PostgreSQL and instructs the browser to clear the cookie.
+6. **Frontend Silent Refresh & Replay Queue:**
+   * In [`frontend/src/api/client.js`](frontend/src/api/client.js), an Axios response interceptor intercepts `401 Unauthorized` errors.
+   * If a refresh is already in progress, subsequent failing requests are placed into a promise queue (`failedQueue`).
+   * The interceptor calls `POST /api/auth/refresh`. Upon success, the new access token is stored in memory, all queued requests are replayed with the new Bearer header, and the original request is executed.
+   * Anti-loop safeguards prevent recursion on authentication endpoints (`/auth/login`, `/auth/signup`, `/auth/refresh`). If refresh fails, memory state is wiped and the user is redirected to `/login`.
+
+---
+
+## 🛡️ Backend Role-Based Access Control (RBAC)
+
+Shelf collaboration permissions are strictly enforced on the backend via the centralized `get_shelf_with_role(db, user_id, shelf_id)` service function.
+
+| Action | Shelf Owner | Editor | Viewer | Unauthorized User |
+|---|:---:|:---:|:---:|:---:|
+| **View shelf metadata & books** | ✅ Allowed | ✅ Allowed | ✅ Allowed | ❌ 404 Not Found |
+| **View collaborator list** | ✅ Allowed | ✅ Allowed | ✅ Allowed | ❌ 404 Not Found |
+| **Add owned book to shelf** | ✅ Allowed | ✅ Allowed | ❌ 403 Forbidden | ❌ 404 Not Found |
+| **Remove book from shelf** | ✅ Allowed | ✅ Allowed | ❌ 403 Forbidden | ❌ 404 Not Found |
+| **Rename shelf** | ✅ Allowed | ❌ 403 Forbidden | ❌ 403 Forbidden | ❌ 404 Not Found |
+| **Delete shelf** | ✅ Allowed | ❌ 403 Forbidden | ❌ 403 Forbidden | ❌ 404 Not Found |
+| **Invite collaborator** | ✅ Allowed | ❌ 403 Forbidden | ❌ 403 Forbidden | ❌ 404 Not Found |
+| **Change collaborator role** | ✅ Allowed | ❌ 403 Forbidden | ❌ 403 Forbidden | ❌ 404 Not Found |
+| **Remove collaborator** | ✅ Allowed | ❌ 403 (Can leave) | ❌ 403 (Can leave) | ❌ 404 Not Found |
+
+### Key Authorization Principles
+* **Information Leakage Prevention:** Unauthorized users requesting an unshared shelf receive `404 Not Found` rather than `403 Forbidden`, preventing enumeration of private user collections.
+* **Book Ownership Invariant:** An editor adding a book to a shared shelf can only add a book they personally own (`Book.user_id == current_user.id`).
+* **Cascade Isolation:** Deleting a shared shelf deletes only the shelf and join rows (`shelf_books`, `shelf_shares`); all actual books remain intact in their respective owners' libraries.
+
+---
+
+## 📄 Server-Side Book Pagination, Search & Sorting
+
+Book catalog listing (`GET /api/books`) executes entirely within the database engine rather than loading records into memory:
+
+* **Query Parameters:**
+  * `page` (default: 1)
+  * `page_size` (default: 10, max: 100)
+  * `status` (optional: `want_to_read`, `reading`, `finished`)
+  * `shelf_id` (optional: UUID of shelf)
+  * `search` (optional: search term)
+  * `sort_by` (optional: `created_at`, `date_added`, `updated_at`, `title`, `author`, `rating`, `current_page`)
+  * `sort_dir` (optional: `asc`, `desc`)
+* **SQL Filtering & Search:**
+  * Status filtering: `WHERE books.status = :status`
+  * Text search: `WHERE (books.title ILIKE :term OR books.author ILIKE :term)`
+  * Shelf scoping: Joins `shelf_books` after checking RBAC access.
+* **Database Aggregation & Pagination:**
+  * Exact matching count computed via `SELECT COUNT(*) ...` prior to pagination.
+  * Sliced at SQL level using `.offset((page - 1) * page_size).limit(page_size)`.
+* **Deterministic Stable Secondary Sorting:**
+  * Sorting always appends `Book.id.asc()` as a secondary sort criterion (e.g. `ORDER BY rating DESC NULLS LAST, id ASC`). This guarantees that pagination boundaries remain stable when multiple books share identical ratings, titles, or dates.
+* **Response Payload (`PaginatedBooksResponse`):**
+  ```json
+  {
+    "items": [...],
+    "total": 42,
+    "page": 1,
+    "page_size": 10,
+    "total_pages": 5
+  }
+  ```
+
+---
+
+## ⚡ WebSocket & Real-Time Design
+
+Real-time collaboration is built with `python-socketio` mounted as an ASGI application wrapper alongside FastAPI in [`backend/app/main.py`](backend/app/main.py):
+
+```python
+socket_app = socketio.ASGIApp(
+    socketio_server=sio,
+    other_asgi_app=app,
+    socketio_path="socket.io",
+)
+```
+
+### Handshake Authentication
+* Clients authenticate during the Socket.IO connection handshake by passing the short-lived JWT access token in the `auth` object (`{ auth: { token: accessToken } }`).
+* Handshake validation decodes the token with the server's `SECRET_KEY`, validates expiration, and strictly verifies `token_type == 'access'`. Refresh tokens or unauthenticated attempts are rejected.
+
+### Room Architecture & Scoping
+* **Personal Room (`user_{user_id}`):** Automatically joined upon connection. Delivers private events such as book additions, progress updates, lending notifications, and revocation alerts.
+* **Shelf Room (`shelf_{shelf_id}`):** Clients join via `sio.emit("join_shelf", { shelf_id })`. The server queries the database to verify the user is an owner, editor, or viewer before granting room entry.
+* **Instantaneous Access Revocation:** When a shelf owner removes a collaborator, the server calls `remove_user_from_shelf_room()`, iterating over the user's active session IDs, removing them from `shelf_{shelf_id}`, and emitting `shelf_access_revoked` to their personal room.
+
+### Post-Commit Event Emission
+Real-time events are dispatched only after the active database transaction has committed:
+* `book_added`, `book_updated`, `book_deleted`
+* `progress_updated`
+* `shelf_created`, `shelf_renamed`, `shelf_deleted`
+* `shelf_book_added`, `shelf_book_removed`
+* `shelf_shared`, `shelf_role_changed`, `shelf_share_removed`
+* `book_lent`, `book_returned`
+* `activity_created`
+
+### Lightweight Refetch Synchronization
+The React frontend avoids brittle client-side cache manipulation. When a real-time event is received, `useSocket` triggers lightweight refetch callbacks (`fetchBooks`, `fetchShelves`, `fetchDashboardSummary`, `fetchActivities`), preserving server-side pagination offsets, active search queries, and status filters.
+
+---
+
+## 🌐 API Overview
+
+All REST routes are prefixed with `/api`. Interactive documentation is available at `/docs` (Swagger UI) and `/redoc` (ReDoc).
+
+### System & Health
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `GET` | `/api/health` | Health check endpoint (`{"status": "ok"}`) | Public |
+
+### Authentication (`/api/auth`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `POST` | `/api/auth/signup` | Register new user; returns access token + set HttpOnly cookie | Public |
+| `POST` | `/api/auth/login` | Authenticate user; returns access token + set HttpOnly cookie | Public |
+| `POST` | `/api/auth/refresh` | Rotate refresh token via HttpOnly cookie; returns new access token | Cookie |
+| `POST` | `/api/auth/logout` | Revoke active refresh token in database and delete cookie | Public |
+| `GET` | `/api/auth/me` | Retrieve authenticated user profile | Bearer |
+
+### Books Catalog (`/api/books`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `GET` | `/api/books` | Server-side paginated, searchable, status-filtered book list | Bearer |
+| `POST` | `/api/books` | Add new book to personal library | Bearer |
+| `GET` | `/api/books/stats/summary` | Aggregated user reading statistics | Bearer |
+| `GET` | `/api/books/{id}` | Get book detail (owner only) | Bearer |
+| `PATCH` | `/api/books/{id}` | Partial book update with boundary validation | Bearer |
+| `PUT` | `/api/books/{id}` | Full book update | Bearer |
+| `DELETE` | `/api/books/{id}` | Delete book from library (owner only) | Bearer |
+| `POST` | `/api/books/{id}/progress` | Record reading progress, detect milestones, auto-advance status | Bearer |
+
+### Custom Shelves (`/api/shelves`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `GET` | `/api/shelves` | List user's owned and shared custom shelves with book counts | Bearer |
+| `POST` | `/api/shelves` | Create custom shelf (enforces unique name per user) | Bearer |
+| `GET` | `/api/shelves/{id}` | Get shelf detail with books and collaborators (Owner/Editor/Viewer) | Bearer |
+| `PATCH` | `/api/shelves/{id}` | Rename shelf (Owner only) | Bearer |
+| `PUT` | `/api/shelves/{id}` | Update shelf (Owner only) | Bearer |
+| `DELETE` | `/api/shelves/{id}` | Delete shelf (Owner only; cascade-safe, preserves books) | Bearer |
+| `POST` | `/api/shelves/{id}/books` | Add owned book to shelf (Owner or Editor) | Bearer |
+| `DELETE` | `/api/shelves/{id}/books/{book_id}` | Remove book from shelf (Owner or Editor) | Bearer |
+
+### Shelf Collaboration & RBAC (`/api/shelves/{id}/shares`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `POST` | `/api/shelves/{id}/shares` | Invite collaborator by email as `editor` or `viewer` (Owner only) | Bearer |
+| `GET` | `/api/shelves/{id}/shares` | List active shelf collaborators (Owner/Editor/Viewer) | Bearer |
+| `PATCH` | `/api/shelves/{id}/shares/{share_id}` | Update collaborator role (Owner only) | Bearer |
+| `DELETE` | `/api/shelves/{id}/shares/{share_id}` | Remove collaborator (Owner) or leave shelf (Collaborator) | Bearer |
+
+### Peer-to-Peer Book Lending (`/api/lending`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `POST` | `/api/lending` | Lend owned book to registered user (Owner only; 409 if actively lent) | Bearer |
+| `GET` | `/api/lending` | List loans with `role` (`lender`/`borrower`/`all`) and `status` filters | Bearer |
+| `GET` | `/api/lending/borrowed` | List active books borrowed by authenticated user (read-only) | Bearer |
+| `GET` | `/api/lending/borrowed/{book_id}` | Get read-only detail of single borrowed book | Bearer |
+| `GET` | `/api/lending/book/{book_id}` | Complete lending history for owned book (Owner only) | Bearer |
+| `POST` | `/api/lending/{id}/return` | Mark active loan returned (Owner/Lender only) | Bearer |
+| `GET` | `/api/lending/{id}` | Get single loan record (Lender or Borrower only) | Bearer |
+
+### Activity Feed (`/api/activities`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `GET` | `/api/activities` | Server-side paginated activity feed with action and shelf filtering | Bearer |
+
+### Dashboard Analytics (`/api/dashboard`)
+| Method | Endpoint | Description | Auth |
+|---|---|---|:---:|
+| `GET` | `/api/dashboard/summary` | Aggregated dashboard summary metrics calculated via SQL | Bearer |
+
+### WebSockets (`/socket.io/`)
+| Protocol | Path | Description | Handshake Auth |
+|---|---|---|:---:|
+| `WS` | `/socket.io/` | Bi-directional real-time event channel | JWT Access Token |
+
+---
+
+## 🚀 Setup & Running Locally
 
 ### Prerequisites
 * **Python 3.11+**
 * **Node.js 18+** and **npm**
 * **PostgreSQL 15+** running locally
+* **Git**
 
 ---
 
-### 1. Backend Setup
+### 1. Database Setup
 
-1. Navigate to the backend directory:
+Create the PostgreSQL database using `psql` or your database management tool:
+
+```sql
+CREATE DATABASE booknest;
+```
+
+---
+
+### 2. Backend Setup
+
+1. Open a terminal and navigate to the backend directory:
    ```bash
    cd backend
    ```
@@ -247,40 +574,45 @@ cp backend/.env.example backend/.env
      source venv/bin/activate
      ```
 
-3. Install required Python packages:
+3. Install backend dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Configure your `.env` file with your PostgreSQL credentials.
+4. Create your local `.env` configuration file from the template:
+   * **Windows (PowerShell):**
+     ```powershell
+     Copy-Item .env.example .env
+     ```
+   * **macOS / Linux:**
+     ```bash
+     cp .env.example .env
+     ```
 
-5. Create the database in PostgreSQL (if not already created):
-   ```sql
-   CREATE DATABASE booknest;
-   ```
+5. Edit `backend/.env` with your PostgreSQL database credentials (e.g. `DATABASE_URL=postgresql://postgres:yourpassword@localhost:5432/booknest`).
 
-6. Run Alembic migrations to create all database tables:
+6. Execute database migrations:
    ```bash
    alembic upgrade head
    ```
 
-7. Start the development server (serving both FastAPI and Socket.IO):
+7. Start the backend ASGI server (serving both FastAPI and Socket.IO):
    ```bash
    uvicorn app.main:socket_app --reload --port 8000
    ```
 
-The backend API and WebSocket server will be running at **`http://localhost:8000`**.
+The backend API and WebSocket server will run at **`http://localhost:8000`**.
 
 ---
 
-### 2. Frontend Setup
+### 3. Frontend Setup
 
-1. Open a new terminal and navigate to the frontend directory:
+1. Open a second terminal and navigate to the frontend directory:
    ```bash
    cd frontend
    ```
 
-2. Install Node dependencies:
+2. Install frontend dependencies:
    ```bash
    npm install
    ```
@@ -290,147 +622,253 @@ The backend API and WebSocket server will be running at **`http://localhost:8000
    npm run dev
    ```
 
-The frontend application will be running at **`http://localhost:5173`**.
+The frontend application will run at **`http://localhost:5173`**.
 
 ---
 
-## 🔌 Proxy & API Communication
-
-In development, frontend network requests use relative paths against `/api`:
-
-```javascript
-// frontend/src/api/client.js
-import axios from 'axios'
-
-const api = axios.create({
-  baseURL: '/api',
-  headers: { 'Content-Type': 'application/json' },
-  withCredentials: true,
-})
-
-export default api
-```
-
-[`frontend/vite.config.js`](frontend/vite.config.js) automatically reverse-proxies these requests to the FastAPI backend:
-
-```javascript
-server: {
-  port: 5173,
-  proxy: {
-    '/api': {
-      target: 'http://localhost:8000',
-      changeOrigin: true,
-    },
-    '/socket.io': {
-      target: 'http://localhost:8000',
-      changeOrigin: true,
-      ws: true,
-    },
-  },
-}
-```
-
-* **Benefits:**
-  * Avoids Cross-Origin Resource Sharing (CORS) friction during local development.
-  * Treats authentication cookies (`HttpOnly` refresh tokens) as first-party cookies on port `5173`, avoiding modern browser third-party cookie blocking.
+### Expected URLs
+* **Frontend Application:** `http://localhost:5173`
+* **Backend API & WebSockets:** `http://localhost:8000`
+* **Interactive API Documentation (Swagger UI):** `http://localhost:8000/docs`
+* **Alternative API Documentation (ReDoc):** `http://localhost:8000/redoc`
+* **Backend Health Check:** `http://localhost:8000/api/health`
 
 ---
 
-## 📖 API Documentation Endpoint
+## ⚙️ Environment Variables
 
-FastAPI automatically serves interactive API documentation:
+Create `.env` inside `backend/` using `backend/.env.example` as a template:
 
-* **Interactive Swagger UI:** [http://localhost:8000/docs](http://localhost:8000/docs)
-* **ReDoc Alternative:** [http://localhost:8000/redoc](http://localhost:8000/redoc)
+| Variable | Description | Default in `.env.example` |
+|---|---|---|
+| `DATABASE_URL` | PostgreSQL connection string | `postgresql://postgres:postgres@localhost:5432/booknest` |
+| `SECRET_KEY` | Secret key used to sign JWT access tokens | `your-secret-key-change-in-production` |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | Lifespan of JWT access token in minutes | `15` |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | Lifespan of refresh token in days | `7` |
+| `CORS_ORIGINS` | JSON array of permitted CORS origins | `["http://localhost:5173"]` |
+| `COOKIE_SECURE` | Set `false` for local HTTP; `true` for production HTTPS | `false` |
 
-### Currently Implemented Endpoints
-* **System & Health:**
-  * `GET /api/health` — Service health check (returns `{"status": "ok"}`).
-* **Authentication (Phase 2):**
-  * `POST /api/auth/signup` — Register a new user account.
-  * `POST /api/auth/login` — Authenticate user, returns in-memory access token + HttpOnly refresh cookie.
-  * `POST /api/auth/refresh` — Rotate single-use refresh token with concurrency protection.
-  * `POST /api/auth/logout` — Revoke active refresh token.
-  * `GET /api/auth/me` — Retrieve current authenticated user profile.
-* **Personal Books & Catalog (Phase 3 & Pagination):**
-  * `GET /api/books` — Server-side paginated, searchable, status-filtered, and sorted book list. Supports `shelf_id` filtering.
-  * `POST /api/books` — Add a new book to the user's library.
-  * `GET /api/books/{id}` — Get single book details.
-  * `PATCH /api/books/{id}` — Partial book update (reading status, progress page, rating, notes).
-  * `PUT /api/books/{id}` — Full book update.
-  * `DELETE /api/books/{id}` — Delete book from library.
-* **Custom Shelves (Phase 4):**
-  * `GET /api/shelves` — List user's owned custom shelves and shared collaborator shelves with accurate book counts.
-  * `POST /api/shelves` — Create custom shelf (enforces unique name per user).
-  * `GET /api/shelves/{id}` — Get shelf detail with associated books and collaborators.
-  * `PATCH /api/shelves/{id}` — Rename shelf (owner only).
-  * `DELETE /api/shelves/{id}` — Delete custom shelf (owner only; cascade-safe, preserves books).
-  * `POST /api/shelves/{id}/books` — Add book to shelf (owner/editor; caller must own the book).
-  * `DELETE /api/shelves/{id}/books/{book_id}` — Remove book from shelf (owner/editor; preserves book).
-* **Shelf Sharing & RBAC (Phase 5):**
-  * `POST /api/shelves/{id}/shares` — Invite collaborator by email (owner only; roles: `editor`, `viewer`).
-  * `GET /api/shelves/{id}/shares` — List active collaborators on shelf.
-  * `PATCH /api/shelves/{id}/shares/{share_id}` — Update collaborator role (owner only).
-  * `DELETE /api/shelves/{id}/shares/{share_id}` — Remove collaborator (owner) or leave shelf (collaborator).
-* **Reading Progress Tracker & Statistics (Phase 6):**
-  * `POST /api/books/{id}/progress` — Update reading progress with automated status transitions (`want_to_read` -> `reading` -> `finished`), milestone detection, reflection notes, rating, and activity logging.
-  * `GET /api/books/stats/summary` — Retrieve aggregated user reading statistics (total books, status counts, total pages read, completion rate).
-* **Peer-to-Peer Book Lending & Active Loan Enforcement (Phase 7):**
-  * `POST /api/lending` — Lend an owned book to another user by email (owner only; 409 Conflict if actively lent).
-  * `GET /api/lending` — List loans with role (`lender`, `borrower`, `all`) and status (`active`, `returned`, `all`) filters.
-  * `GET /api/lending/borrowed` — List books currently borrowed by authenticated user (read-only views).
-  * `GET /api/lending/borrowed/{book_id}` — Get read-only detail of a book borrowed by authenticated user.
-  * `GET /api/lending/book/{book_id}` — Get complete lending history for an owned book (owner only).
-  * `POST /api/lending/{lending_id}/return` — Mark active loan returned (owner/lender only; 403 Forbidden for others).
-  * `GET /api/lending/{lending_id}` — Get single lending record (lender or borrower only).
-* **Activity Feed & Event Audit Logging (Phase 8):**
-  * `GET /api/activities` — Retrieve chronologically ordered activity feed with server-side pagination (`page`, `page_size`), action filtering (`action`), and shelf-scoping (`shelf_id`). Strictly enforces isolation: personal events visible only to book owner, shared shelf events accessible only to current collaborators, and lending events scoped to participants.
+> **Note:** If your PostgreSQL password contains special characters (e.g., `@`), URL-encode them in `DATABASE_URL` (`@` becomes `%40`).
 
 ---
 
-### Automated Test Verification
-Run the backend test suites from the `backend/` directory:
-```bash
+## 🧪 Demo Data
+
+A deterministic, idempotent seed script is provided to populate realistic demo data across all application features.
+
+### Running the Seed Script
+
+Ensure your database is created and migrations are applied, then run:
+
+* **Windows (PowerShell):**
+  ```powershell
+  cd backend
+  .\venv\Scripts\python seed.py
+  ```
+* **macOS / Linux:**
+  ```bash
+  cd backend
+  python seed.py
+  ```
+
+### Demo Accounts (Local Assessment Only)
+
+| Role | Email | Password |
+|---|---|---|
+| **Demo Owner** | `owner@booknest.demo` | `DemoPassword123!` |
+| **Demo Collaborator** | `collaborator@booknest.demo` | `DemoPassword123!` |
+
+### What the Seed Script Demonstrates
+* **7 Sample Books:**
+  * *Clean Architecture* (Owner: finished, 352/352 pages, rating: 5)
+  * *Designing Data-Intensive Applications* (Owner: reading, 280/616 pages, rating: 5)
+  * *The Pragmatic Programmer* (Owner: want_to_read, 0/352 pages, rating: unrated)
+  * *Domain-Driven Design* (Owner: reading, 150/560 pages, rating: 4, actively lent)
+  * *Site Reliability Engineering* (Owner: finished, 550/550 pages, rating: 4)
+  * *Refactoring* (Collaborator: reading, 120/448 pages, rating: 5)
+  * *Patterns of Enterprise Application Architecture* (Collaborator: want_to_read, 0/560 pages)
+* **4 Custom Shelves:**
+  * Owner: "Favorites" (3 books), "Currently Reading" (2 books), "Backend & Tech" (1 book)
+  * Collaborator: "Collab Reading Circle" (1 book)
+* **2 Collaborative Shelf Shares:**
+  * "Favorites" shared with Demo Collaborator as **Editor**
+  * "Backend & Tech" shared with Demo Collaborator as **Viewer**
+* **1 Active Peer Loan:**
+  * *Domain-Driven Design* actively lent from Demo Owner to Demo Collaborator (enforcing active loan protection and borrower read-only view)
+* **Idempotent Audit Log Entries:**
+  * Pre-seeded activity log records for book additions, shelf sharing, and lending events using deterministic `seed_tag` identifiers.
+* **Idempotency Guarantee:**
+  * Running `seed.py` multiple times reuses existing records without throwing duplicate key errors or modifying existing data.
+
+---
+
+## 🔬 Testing
+
+The repository contains 11 dedicated, executable Python integration test suites that verify backend business logic, database invariants, and real-time WebSockets against the live running application.
+
+### Running Backend Test Suites
+
+Ensure the backend server is running in a terminal (`uvicorn app.main:socket_app --reload --port 8000`), then run the test suites from `backend/`:
+
+```powershell
 cd backend
-.\venv\Scripts\python test_realtime_phase9.py
-.\venv\Scripts\python test_activity_phase8.py
-.\venv\Scripts\python test_lending_phase7.py
-.\venv\Scripts\python test_progress_phase6.py
-.\venv\Scripts\python test_shelf_sharing_phase5.py
-.\venv\Scripts\python test_shelves_phase4.py
-.\venv\Scripts\python test_pagination.py
-.\venv\Scripts\python test_books_phase3.py
+
+# Phase 2: Authentication, Password Complexity, Token Rotation
 .\venv\Scripts\python test_auth_phase2.py
+
+# Phase 3: Book Management, Validation, Multi-User Isolation
+.\venv\Scripts\python test_books_phase3.py
+
+# Server-Side Pagination, Filtering, Search, Sorting
+.\venv\Scripts\python test_pagination.py
+
+# Phase 4: Custom Shelves, Many-to-Many Relationships, Cascade Safety
+.\venv\Scripts\python test_shelves_phase4.py
+
+# Phase 5: Shared Shelves, RBAC (Owner / Editor / Viewer)
+.\venv\Scripts\python test_shelf_sharing_phase5.py
+
+# Phase 6: Reading Progress, Milestone Triggers, Auto-Transitions
+.\venv\Scripts\python test_progress_phase6.py
+
+# Phase 7: Peer Lending, Partial Unique Index, Owner Return
+.\venv\Scripts\python test_lending_phase7.py
+
+# Phase 8: Activity Feed, Scoped Visibility, Audit Logging
+.\venv\Scripts\python test_activity_phase8.py
+
+# Phase 9: Real-time WebSockets, Handshake Auth, Room Eviction
+.\venv\Scripts\python test_realtime_phase9.py
+
+# Dashboard Summary SQL Aggregations
+.\venv\Scripts\python test_dashboard_step2.py
+
+# Demo Seed Script Idempotency & Invariants
+.\venv\Scripts\python test_seed.py
+```
+
+*(On macOS/Linux, replace `.\venv\Scripts\python` with `python`).*
+
+### Frontend Build Verification
+
+To verify that the frontend compiles cleanly without TypeScript or bundling errors:
+
+```bash
+cd frontend
+npm run build
 ```
 
 ---
 
-## 💡 Architectural Decision: React + Vite vs. Next.js
+## 📋 Assessment Requirement Coverage
 
-React with Vite was chosen over Next.js for BookNest based on the assessment's architecture requirements:
-
-1. **Decoupled Architecture with FastAPI:** BookNest runs a dedicated Python/FastAPI backend responsible for business logic, database queries, and WebSocket broadcasting. Next.js introduces a secondary Node.js server layer, leading to architectural duplication or requiring `"use client"` across all pages.
-2. **Persistent WebSocket Runtime:** BookNest uses WebSockets for real-time shelf collaboration and lending events. A client-side SPA maintains a persistent socket connection without server-side hydration mismatches or reconnect lifecycles across route transitions.
-3. **Clean Token Refresh Flow:** The required JWT access/refresh token pattern (short-lived access token in memory + Axios 401 interceptor retry queue) integrates cleanly in a pure client SPA without the edge-case complications of Next.js React Server Components (RSC).
-4. **No SEO Requirement:** BookNest is a private, authenticated application (dashboard, library manager, lending system) rather than a public content site; Server-Side Rendering (SSR) offers no tangible benefit for this use case.
-5. **Developer & Reviewer Experience:** Vite provides sub-second startup times, minimal bundle overhead, and zero build-cache quirks for reviewers evaluating the repository.
+| Assessment Requirement Area | Implementation Status | Key Architecture & Verification Files |
+|---|:---:|---|
+| **User Authentication** | ✅ Implemented | HttpOnly cookie refresh, bcrypt hashing, row-level rotation lock ([`backend/app/services/auth_service.py`](backend/app/services/auth_service.py), [`backend/test_auth_phase2.py`](backend/test_auth_phase2.py)) |
+| **Book Management & CRUD** | ✅ Implemented | Multi-user isolation, check constraints, cross-field validation ([`backend/app/services/book_service.py`](backend/app/services/book_service.py), [`backend/test_books_phase3.py`](backend/test_books_phase3.py)) |
+| **Server-Side Pagination & Search** | ✅ Implemented | SQL-level `LIMIT`/`OFFSET`, `ILIKE` search, stable secondary sorting ([`backend/app/services/book_service.py`](backend/app/services/book_service.py), [`backend/test_pagination.py`](backend/test_pagination.py)) |
+| **Custom Shelves (M:N)** | ✅ Implemented | `ShelfBook` join table, unique shelf name constraint per user, cascade safety ([`backend/app/services/shelf_service.py`](backend/app/services/shelf_service.py), [`backend/test_shelves_phase4.py`](backend/test_shelves_phase4.py)) |
+| **Collaborative Shelves & RBAC** | ✅ Implemented | Owner / Editor / Viewer tiers, backend-enforced permission resolver, owner book isolation ([`backend/app/services/shelf_service.py`](backend/app/services/shelf_service.py), [`backend/test_shelf_sharing_phase5.py`](backend/test_shelf_sharing_phase5.py)) |
+| **Reading Progress & Lifecycle** | ✅ Implemented | Dedicated progress updates, automatic status transitions, single milestone triggers ([`backend/app/services/book_service.py`](backend/app/services/book_service.py), [`backend/test_progress_phase6.py`](backend/test_progress_phase6.py)) |
+| **Peer-to-Peer Book Lending** | ✅ Implemented | PostgreSQL partial unique index `ix_lending_active_book`, owner-only return action, borrower read-only view ([`backend/app/services/lending_service.py`](backend/app/services/lending_service.py), [`backend/test_lending_phase7.py`](backend/test_lending_phase7.py)) |
+| **Activity Feed & Audit Logging** | ✅ Implemented | Atomic activity creation, reverse-chronological feed, scoped multi-user visibility ([`backend/app/services/activity_service.py`](backend/app/services/activity_service.py), [`backend/test_activity_phase8.py`](backend/test_activity_phase8.py)) |
+| **Real-Time Synchronization** | ✅ Implemented | `python-socketio` ASGI mount, access token handshake auth, personal/shelf rooms, instant collaborator eviction ([`backend/app/services/realtime_service.py`](backend/app/services/realtime_service.py), [`backend/test_realtime_phase9.py`](backend/test_realtime_phase9.py)) |
+| **Analytics Dashboard** | ✅ Implemented | Server-side SQL aggregations (`GROUP BY`, `AVG`, `COUNT`), top shelf calculation with tie-breaking ([`backend/app/services/dashboard_service.py`](backend/app/services/dashboard_service.py), [`backend/test_dashboard_step2.py`](backend/test_dashboard_step2.py)) |
+| **Demo Seed Script** | ✅ Implemented | Deterministic, idempotent demo data populating 2 users, 7 books, 4 shelves, 2 shares, 1 loan, and activities ([`backend/seed.py`](backend/seed.py), [`backend/test_seed.py`](backend/test_seed.py)) |
 
 ---
 
-## 🗺️ Project Roadmap
+## 🧠 Engineering Decisions & Technical Challenges
 
-| Phase | Milestone | Status |
-|:---:|---|:---:|
-| **0** | Architecture Blueprint, DB Schemas, Permission Matrices | ✅ Completed |
-| **1** | Project Scaffolding, Models, Alembic Migrations, Vite Proxy | ✅ Completed |
-| **2** | Authentication (JWT, bcrypt, Refresh Token Rotation, AuthContext) | ✅ Completed |
-| **3** | Book Management & Personal Library CRUD | ✅ Completed |
-| **4** | Custom Shelves & Many-to-Many Book Categorization | ✅ Completed |
-| **5** | Shelf Sharing & Role-Based Access Control (Owner / Editor / Viewer) | ✅ Completed |
-| **6** | Reading Progress Tracker & Page Updates | ✅ Completed |
-| **7** | Peer-to-Peer Book Lending & Active Loan Enforcement | ✅ Completed |
-| **8** | Activity Feed & Event Audit Logging | ✅ Completed |
-| **9** | Real-time WebSocket Updates (python-socketio) | ✅ Completed |
-| **10** | Statistics Dashboard & Analytics Aggregations | ⏳ *Planned* |
-| **11** | Database Seed Script & Demo Data | ⏳ *Planned* |
-| **12** | Automated Testing Suite (Pytest & Integration Tests) | ⏳ *Planned* |
+1. **Refresh Token Concurrency & Race Conditions:**
+   * *Problem:* In single-page applications, opening multiple tabs or triggering multiple concurrent API requests on page load could trigger simultaneous token refresh calls, causing race conditions where one request invalidates the token before the other completes.
+   * *Solution:* We applied pessimistic row-level locking (`SELECT ... FOR UPDATE` via `with_for_update()`) in PostgreSQL. The first refresh request acquires the lock and replaces the token. Subsequent concurrent requests unblock, detect the token hash has been rotated, and receive `401 Unauthorized`. In the frontend, an Axios request queue buffers concurrent requests until the active refresh resolves, replaying all waiting requests with the newly minted access token.
+2. **Preventing Double Lending at the Database Engine Level:**
+   * *Problem:* Checking whether a book is currently lent in application code is susceptible to race conditions under concurrent requests.
+   * *Solution:* We created a PostgreSQL partial unique index: `CREATE UNIQUE INDEX ix_lending_active_book ON lendings (book_id) WHERE is_active = true`. PostgreSQL rejects any concurrent insertion attempting to create a second active loan on the same book, throwing an `IntegrityError` that the service catches and translates into a `409 Conflict`.
+3. **Information Leakage in Shared Shelves:**
+   * *Problem:* Returning `403 Forbidden` when an unauthorized user accesses `/api/shelves/{id}` inadvertently reveals that a shelf with that ID exists.
+   * *Solution:* The permission resolver returns `404 Not Found` for any shelf the user neither owns nor has an active share for, preserving complete confidentiality.
+4. **Stable Server-Side Pagination Across Sorting Ties:**
+   * *Problem:* Sorting books by non-unique fields (e.g., `rating` or `status`) produces non-deterministic ordering in PostgreSQL across paginated offsets, leading to duplicate or skipped books across pages.
+   * *Solution:* The query builder appends a deterministic secondary sort criterion (`Book.id.asc()`) to all queries, guaranteeing stable pagination boundaries.
+5. **Real-Time Security & Instant Room Eviction:**
+   * *Problem:* Revoking a user's share on a shelf could leave their active WebSocket connected to the shelf room, allowing them to continue eavesdropping on real-time collaboration events.
+   * *Solution:* The service layer maintains an in-memory mapping of active socket session IDs per user. When an owner removes a collaborator, `remove_user_from_shelf_room` evicts all active sockets for that user from the shelf room immediately and emits a `shelf_access_revoked` notice to the user's private room.
+6. **SQL-Level Dashboard Aggregations:**
+   * *Problem:* Computing dashboard statistics by loading books and shelves into Python memory consumes excessive memory and scales poorly as libraries grow.
+   * *Solution:* Metrics in `dashboard_service.py` are executed directly in PostgreSQL using SQL aggregations (`func.count`, `func.avg`, `func.distinct`, and `HAVING`), computing all metrics in single-digit milliseconds.
+
+---
+
+## ⚠️ Known Limitations
+
+Known limitations as of the submission version:
+* **Single-Process WebSocket Architecture:** `python-socketio` is configured with in-memory session and room state. Scaling horizontally across multiple server processes or containers would require attaching a Redis message broker adapter (`AsyncRedisManager`).
+* **Handshake-Only WebSocket Token Expiration:** Access tokens are validated during the initial Socket.IO connection handshake. A persistent socket connection remains active until disconnected; reconnection triggers a new handshake validation.
+* **Direct Database Collaboration Notifications:** Shelf invitations and peer loans are registered directly between existing user accounts in the database; transactional outbound email delivery (e.g. SMTP or AWS SES) is not configured.
+
+---
+
+## 🔮 Future Improvements
+
+Sensible future enhancements for production deployment:
+* **Automated CI/CD Pipeline:** GitHub Actions workflow executing linting, migrations, and automated integration test suites on pull requests.
+* **Distributed Socket.IO Message Bus:** Redis adapter integration for horizontal backend scaling across multi-instance clusters.
+* **Optimistic UI Updates:** Client-side optimistic cache updates for instantaneous reading progress slider feedback.
+* **Library Import / Export:** Support for exporting catalog data to CSV/JSON and importing from Goodreads or OpenLibrary.
+* **Email Notification Delivery:** Transactional emails for shelf share invitations and loan return reminders.
+
+---
+
+## 🤖 AI Usage Disclosure
+
+In accordance with assessment guidelines, AI assistance tools were utilized during the development of BookNest:
+* **Ideation & Architecture:** Exploring edge cases in token rotation concurrency, schema design for partial unique indexes, and WebSocket room isolation strategies.
+* **Boilerplate & Test Generation:** Generating comprehensive integration test scripts, assertion patterns, and mock datasets.
+* **Documentation Structuring:** Drafting and formatting markdown documentation, tables, and architectural workflows.
+
+**Human Engineering Verification:**
+* All architectural decisions, database models, business logic invariants, and security rules were designed, reviewed, and finalized by the developer.
+* All code, migrations, and test suites were executed, debugged, and verified locally against PostgreSQL and live browser sessions. AI output was never accepted without manual validation and empirical verification.
+
+---
+
+## 🎬 Demo Walkthrough (4–6 Minutes)
+
+A suggested demonstration flow using the seeded demo data:
+
+1. **Setup Browsers:**
+   * Open two separate browser windows (or one regular window and one incognito window).
+   * **Browser 1 (Owner):** Log in as `owner@booknest.demo` (`DemoPassword123!`).
+   * **Browser 2 (Collaborator):** Log in as `collaborator@booknest.demo` (`DemoPassword123!`).
+2. **Dashboard Overview (Browser 1):**
+   * Observe the dashboard metrics: Status Counts (1 want to read, 2 reading, 2 finished), Books Finished This Year (2), Average Rating (4.5), Shelf with Most Books ("Favorites", 3 books), and Books Lent Out (1).
+   * Review the recent activity audit stream.
+3. **Personal Library & Filtering (Browser 1):**
+   * Navigate to the library view. Test filtering by status (`reading`), searching by author (`Kleppmann`), and sorting by rating.
+   * Observe server-side pagination with non-overlapping pages and stable ordering.
+4. **Reading Progress & Milestone Updates (Browser 1):**
+   * Select *The Pragmatic Programmer* (currently `want_to_read`, page 0).
+   * Update progress to page 88.
+   * Observe the automated status transition from `want_to_read` to `reading` and the 25% milestone celebration toast.
+5. **Shared Shelves & RBAC Demonstration (Browser 1 & 2):**
+   * On Browser 2 (Collaborator), observe the "Shared with me" section showing "Favorites" (Editor badge) and "Backend & Tech" (Viewer badge).
+   * Open "Favorites" on Browser 2: Add Collaborator's owned book (*Refactoring*) to the shelf.
+   * Open "Backend & Tech" on Browser 2: Confirm that add/remove book actions and collaborator settings are disabled (Viewer read-only mode).
+6. **Peer-to-Peer Book Lending & Return (Browser 1 & 2):**
+   * On Browser 2, click the "Borrowed" tab to view *Domain-Driven Design* borrowed from Demo Owner (read-only mode; cannot edit or lend onward).
+   * On Browser 1, navigate to the "Lent" tab and click "Mark Returned" on *Domain-Driven Design*.
+   * Watch Browser 2 immediately reflect the loan return in real-time via WebSocket without reloading the page.
+7. **Activity Feed Audit Trail (Browser 1 & 2):**
+   * Open the Activity Feed on both browsers to inspect the chronologically logged events (`status_changed`, `shelf_book_added`, `book_returned`) with proper user scoping.
+
+---
+
+## 📦 Submission & Git Notes
+
+* **Repository Integrity:** Public GitHub repository with a clean, granular, chronological Git commit history demonstrating iterative development across all phases.
+* **Environment Configuration:** Comprehensive `.env.example` templates provided in both project root and `backend/`.
+* **Database Migrations:** Schema managed through Alembic (`2026_09_17_1857-19f40499af4c_initial_tables.py`).
+* **Seeded Demo State:** Fully automated, idempotent seed script (`backend/seed.py`) with verification suite (`backend/test_seed.py`).
+* **Clean-Clone Readiness:** Fully documented local run commands enabling evaluators to run the application from a clean clone.
